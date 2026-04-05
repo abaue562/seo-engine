@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+dist/
+build/
+
+# Node / Next.js
+node_modules/
+ui/.next/
+ui/out/
+
+# Env & secrets
+.env
+config/.env
+*.env
+
+# Debug / output artifacts
+debug_screenshots/
+*.png
+*.jpg
+*.json
+*.html
+*.xml
+*.mp4
+*.webp
+
+# Misc
+.DS_Store
+*.log

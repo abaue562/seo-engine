@@ -1,0 +1,40 @@
+version: "3.8"
+
+services:
+  seo-api:
+    build: .
+    container_name: seo-engine-api
+    expose:
+      - "8900"
+    env_file:
+      - config/.env
+    volumes:
+      - ./data/storage/local_db:/app/data/storage/local_db
+    restart: unless-stopped
+    networks:
+      - aion-net
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8901/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  seo-ui:
+    build:
+      context: ./ui
+      dockerfile: Dockerfile
+    container_name: seo-engine-ui
+    expose:
+      - "3000"
+    environment:
+      - SEO_API_INTERNAL=http://seo-engine-api:8900
+    depends_on:
+      - seo-api
+    restart: unless-stopped
+    networks:
+      - aion-net
+
+networks:
+  aion-net:
+    external: true
+    name: aion_aion-net

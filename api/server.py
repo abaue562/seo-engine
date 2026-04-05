@@ -1,0 +1,1188 @@
+"""SEO Engine API v7 — full autonomous SEO domination system."""
+
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+from typing import Literal
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+
+from config.settings import PORT, LOG_LEVEL
+from core.agents.brain import SEOBrain
+from core.agents.orchestrator import AgentOrchestrator
+from core.scoring.engine import score_and_rank
+from data.storage.database import Database
+from data.pipeline import IngestionPipeline
+from execution.router import ExecutionRouter
+from execution.models import ExecResult
+from learning.loops import LearningEngine, LearningReport
+from learning.patterns import PatternMemory
+from core.claude import get_mode
+from models.business import BusinessContext
+from models.task import SEOTask, TaskBatch
+
+logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
+log = logging.getLogger(__name__)
+
+brain: SEOBrain | None = None
+orchestrator: AgentOrchestrator | None = None
+db: Database | None = None
+pipeline: IngestionPipeline | None = None
+executor: ExecutionRouter | None = None
+learner: LearningEngine | None = None
+patterns: PatternMemory | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global brain, orchestrator, db, pipeline, executor, learner, patterns
+    db = Database()
+    brain = SEOBrain()
+    orchestrator = AgentOrchestrator()
+    pipeline = IngestionPipeline(db)
+    executor = ExecutionRouter(db)
+    learner = LearningEngine(db)
+    patterns = PatternMemory(db)
+    log.info("SEO Engine v5 initialized  model=%s", brain.model)
+    yield
+
+
+app = FastAPI(
+    title="SEO Engine",
+    version="1.0.0",
+    description="Autonomous SEO domination system — analyze, decide, execute, learn, predict, signal, dominate",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3900", "http://127.0.0.1:3900"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ---- Request / Response models ----
+
+class AnalyzeRequest(BaseModel):
+    business: BusinessContext
+    input_type: Literal["GBP", "WEBSITE", "CONTENT", "AUTHORITY", "FULL"] = "FULL"
+    max_actions: int = Field(default=5, ge=1, le=20)
+
+
+class OrchestrateRequest(BaseModel):
+    business: BusinessContext
+    input_type: Literal["GBP", "WEBSITE", "CONTENT", "AUTHORITY", "FULL"] = "FULL"
+    disagreement_mode: bool = False
+
+
+class OrchestrateResponse(BaseModel):
+    tasks: TaskBatch
+    pipeline_log: dict
+
+
+class IngestRequest(BaseModel):
+    business: BusinessContext
+    business_id: str
+    skip_gsc: bool = False
+    skip_gbp: bool = False
+    skip_crawl: bool = False
+    skip_competitors: bool = False
+    skip_keywords: bool = False
+
+
+class IngestResponse(BaseModel):
+    agent_context: str
+    freshness: str
+    events: list[dict]
+    data_sources: dict
+
+
+class ExecuteRequest(BaseModel):
+    """Execute scored tasks."""
+    tasks: list[SEOTask]
+    business: BusinessContext
+    business_id: str
+    shadow_mode: bool = False     # True = generate but don't publish
+
+
+class ExecuteResponse(BaseModel):
+    results: list[dict]
+    executed: int
+    queued: int
+    skipped: int
+    failed: int
+
+
+class FullRunRequest(BaseModel):
+    """Full pipeline: ingest → analyze → execute → learn."""
+    business: BusinessContext
+    business_id: str
+    input_type: Literal["GBP", "WEBSITE", "CONTENT", "AUTHORITY", "FULL"] = "FULL"
+    disagreement_mode: bool = False
+    auto_execute: bool = False     # Execute AUTO tasks immediately
+    shadow_mode: bool = False      # Shadow mode for execution
+    skip_gsc: bool = False
+    skip_gbp: bool = False
+    skip_crawl: bool = False
+    skip_competitors: bool = False
+    skip_keywords: bool = False
+
+
+class FullRunResponse(BaseModel):
+    tasks: TaskBatch
+    execution_results: list[dict]
+    events: list[dict]
+    freshness: str
+    pipeline_log: dict
+
+
+class ApproveRequest(BaseModel):
+    task_id: str
+    business_id: str
+
+
+class RollbackRequest(BaseModel):
+    task_id: str
+
+
+class LearnRequest(BaseModel):
+    business_id: str
+    cycle: Literal["weekly", "monthly"] = "weekly"
+
+
+class ScoreRequest(BaseModel):
+    tasks: list[SEOTask]
+    apply_filters: bool = True
+
+
+class ScoreResponse(BaseModel):
+    tasks: list[SEOTask]
+    filtered_count: int
+
+
+# ---- Endpoints ----
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "service": "seo-engine", "version": "1.0.0", "claude_mode": get_mode()}
+
+
+# --- AIC Engine ---
+
+class AICRequest(BaseModel):
+    keyword: str
+    business: BusinessContext
+
+
+@app.post("/aic")
+async def aic_funnel(req: AICRequest):
+    """Generate complete Attention -> Intent -> Conversion funnel for one keyword."""
+    from aic.engine import AICEngine
+    engine = AICEngine()
+    result = await engine.generate(req.keyword, req.business)
+    return result.model_dump()
+
+
+@app.post("/influence")
+async def influence_strategy(req: AICRequest):
+    """Influence OS: perception map + narrative control + consensus + demand creation."""
+    from aic.influence import InfluenceOS
+    ios = InfluenceOS()
+    result = await ios.generate(req.keyword, req.business)
+    return result.model_dump()
+
+
+@app.post("/perception")
+async def perception_cycle_endpoint(req: AICRequest):
+    """Perception Engine: detect narratives, choose strategy, deploy messaging."""
+    from aic.perception.engine import run_perception_cycle
+    result = await run_perception_cycle(
+        keyword=req.keyword,
+        business_name=req.business.business_name,
+        service=req.business.primary_service,
+        city=req.business.primary_city,
+        reviews=req.business.reviews_count,
+        competitors=req.business.competitors,
+    )
+    return result.model_dump()
+
+
+# --- Simulation ---
+
+class SimulateRequest(BaseModel):
+    keyword: str
+    current_position: int = 10
+    current_ctr: float = 0.025
+    current_traffic: int = 100
+    current_authority: float = 25
+
+
+@app.post("/simulate")
+async def simulate(req: SimulateRequest):
+    """Simulate multiple strategies and pick the best one BEFORE executing."""
+    from simulation.engine import run_simulation
+    result = run_simulation(
+        keyword=req.keyword,
+        current_position=req.current_position,
+        current_ctr=req.current_ctr,
+        current_traffic=req.current_traffic,
+        current_authority=req.current_authority,
+    )
+    return result.model_dump()
+
+
+# --- Self-Evolution ---
+
+class EvolveRequest(BaseModel):
+    business_id: str = "default"
+
+
+@app.post("/evolve")
+async def self_evolve_endpoint(req: EvolveRequest):
+    """Run one self-evolution cycle: assess health, mutate strategy, evolve prompts."""
+    from learning.evolution import self_evolve, StrategyParams, PromptModifier
+    from core.prompts.system import MASTER_SYSTEM_PROMPT
+
+    params = StrategyParams()
+    modifiers: list[PromptModifier] = []
+
+    new_params, evolved_prompt, new_mods, health = await self_evolve(
+        db=db,
+        business_id=req.business_id,
+        params=params,
+        base_prompt=MASTER_SYSTEM_PROMPT,
+        modifiers=modifiers,
+    )
+
+    return {
+        "health": health.model_dump(),
+        "strategy_mutations": {
+            "aggressiveness": new_params.aggressiveness,
+            "content_depth": new_params.content_depth,
+            "link_velocity": new_params.link_velocity,
+            "update_frequency_days": new_params.update_frequency_days,
+            "min_confidence": new_params.min_confidence,
+        },
+        "prompt_modifiers": len([m for m in new_mods if m.active]),
+        "prompt_preview": evolved_prompt[-200:] if len(evolved_prompt) > 200 else evolved_prompt,
+    }
+
+
+@app.get("/health/system")
+async def system_health():
+    """Get overall system health metrics."""
+    from learning.evolution import assess_health, StrategyParams, PromptModifier
+    from learning.patterns import PatternMemory
+
+    patterns = PatternMemory(db)
+    all_patterns = await patterns.get_all_patterns()
+    health = assess_health(all_patterns, StrategyParams(), [], [])
+    return health.model_dump()
+
+
+# --- Campaign Orchestrator ---
+
+class CampaignRequest(BaseModel):
+    keyword: str
+    business: BusinessContext
+    duration_days: int = 21
+
+
+@app.post("/campaign")
+async def create_campaign(req: CampaignRequest):
+    """Create a 21-day phased campaign: foundation → distribution → amplification → reinforcement."""
+    from orchestration.campaign import CampaignOrchestrator
+    orch = CampaignOrchestrator()
+    campaign = await orch.create_campaign(req.keyword, req.business, req.duration_days)
+    return orch.campaign_summary(campaign)
+
+
+# --- Personas ---
+
+class PersonaRequest(BaseModel):
+    keyword: str
+    business: BusinessContext
+    max_personas: int = 3
+
+
+@app.post("/personas")
+async def persona_campaign(req: PersonaRequest):
+    """Generate multi-persona content — different voices for different channels."""
+    from personas.system import PersonaSystem
+    system = PersonaSystem()
+    campaign = await system.generate_campaign(
+        keyword=req.keyword,
+        business_name=req.business.business_name,
+        city=req.business.primary_city,
+        max_personas=req.max_personas,
+    )
+    return campaign.model_dump()
+
+
+@app.get("/personas/list")
+async def list_personas():
+    """List all available personas and their stats."""
+    from personas.system import PersonaSystem
+    system = PersonaSystem()
+    return system.get_summary()
+
+
+# --- External Network ---
+
+@app.post("/web-post")
+async def web_posting_plan(req: AICRequest):
+    """Find REAL third-party websites and prepare submissions for each one."""
+    from execution.connectors.external.web_poster import WebPoster
+    poster = WebPoster()
+    plan = await poster.create_posting_plan(
+        keyword=req.keyword,
+        business_name=req.business.business_name,
+        service=req.business.primary_service,
+        city=req.business.primary_city,
+        website=req.business.website,
+    )
+    return plan.model_dump()
+
+
+class AutoSignupRequest(BaseModel):
+    keyword: str
+    business: BusinessContext
+    max_sites: int = 3
+    use_ai_browser: bool = False    # True = browser-use AI, False = Playwright
+
+
+@app.post("/auto-signup")
+async def auto_signup(req: AutoSignupRequest):
+    """Find sites + auto-register on them (disposable email + form filling)."""
+    from execution.connectors.external.web_poster import WebPoster
+    poster = WebPoster()
+
+    # Step 1: Find targets
+    targets = await poster.find_targets(
+        req.keyword, req.business.business_name,
+        req.business.primary_service, req.business.primary_city,
+    )
+    if not targets:
+        return {"status": "no_targets", "results": []}
+
+    # Step 2: Prepare content
+    submissions = await poster.prepare_submissions(
+        targets, req.business.business_name, req.business.primary_service,
+        req.business.primary_city, req.business.website,
+    )
+
+    # Step 3: Auto-register
+    results = await poster.auto_register_sites(
+        targets=targets,
+        submissions=submissions,
+        business_name=req.business.business_name,
+        website=req.business.website,
+        city=req.business.primary_city,
+        service=req.business.primary_service,
+        max_sites=req.max_sites,
+        use_ai=req.use_ai_browser,
+    )
+
+    return {
+        "status": "completed",
+        "sites_found": len(targets),
+        "signups_attempted": len(results),
+        "results": results,
+    }
+
+
+@app.post("/create-email")
+async def create_disposable_email():
+    """Create a disposable email address with real inbox (for testing)."""
+    from execution.connectors.external.auto_signup import AutoSignupEngine
+    engine = AutoSignupEngine()
+    email, password = await engine.create_email()
+    return {"email": email, "password": password}
+
+
+@app.post("/external-network")
+async def external_network(req: AICRequest):
+    """Generate platform-adapted content for Medium, Reddit, Quora, directories."""
+    from execution.connectors.external.network import ExternalNetwork
+    network = ExternalNetwork()
+    plan = await network.plan_distribution(
+        keyword=req.keyword,
+        business_name=req.business.business_name,
+        service=req.business.primary_service,
+        city=req.business.primary_city,
+        target_page=f"{req.business.website}/{req.keyword.replace(' ', '-')}",
+    )
+    return plan.model_dump()
+
+
+# --- Publish ---
+
+class PublishRequest(BaseModel):
+    aic_result: dict = {}
+    dry_run: bool = True
+
+
+@app.get("/publish/status")
+async def publish_status():
+    """Show which publishing channels are connected and which need setup."""
+    import os
+    return {
+        "channels": {
+            "wordpress": {
+                "status": "ready" if os.getenv("WP_URL") and os.getenv("WP_USER") else "needs_setup",
+                "setup": "Add WP_URL, WP_USER, WP_APP_PASSWORD to config/.env",
+                "auto_publish": True,
+            },
+            "medium": {
+                "status": "ready" if os.getenv("MEDIUM_TOKEN") else "needs_setup",
+                "setup": "Get token at medium.com/me/settings/security -> Add MEDIUM_TOKEN to config/.env",
+                "auto_publish": True,
+            },
+            "blogger": {
+                "status": "ready" if os.getenv("BLOGGER_BLOG_ID") else "needs_setup",
+                "setup": "Create free blog at blogger.com -> Add BLOGGER_BLOG_ID to config/.env",
+                "auto_publish": True,
+                "owns": False,
+            },
+            "wordpress_com": {
+                "status": "ready" if os.getenv("WP_COM_TOKEN") else "needs_setup",
+                "setup": "Create free blog at wordpress.com -> Get OAuth token -> Add WP_COM_SITE + WP_COM_TOKEN to config/.env",
+                "auto_publish": True,
+                "owns": False,
+            },
+            "tumblr": {
+                "status": "ready" if os.getenv("TUMBLR_TOKEN") else "needs_setup",
+                "setup": "Create blog at tumblr.com -> Register app -> Add TUMBLR_* to config/.env",
+                "auto_publish": True,
+                "owns": False,
+            },
+            "pinterest": {
+                "status": "ready" if os.getenv("PINTEREST_TOKEN") else "needs_setup",
+                "setup": "Create business account -> Get API token -> Add PINTEREST_TOKEN + PINTEREST_BOARD to config/.env",
+                "auto_publish": True,
+                "owns": False,
+            },
+            "social": {
+                "status": "active",
+                "setup": "Content generated and queued. Post manually or connect via n8n.",
+                "auto_publish": False,
+            },
+            "tiktok": {
+                "status": "active",
+                "setup": "Scripts generated. Film and post. No direct API available.",
+                "auto_publish": False,
+            },
+            "gbp": {
+                "status": "active",
+                "setup": "Posts generated. Copy to GBP dashboard or use Playwright automation.",
+                "auto_publish": False,
+            },
+            "reddit": {
+                "status": "active",
+                "setup": "Discussion posts generated. Post manually (recommended for trust building).",
+                "auto_publish": False,
+            },
+            "quora": {
+                "status": "active",
+                "setup": "Answers generated. Post manually.",
+                "auto_publish": False,
+            },
+            "directories": {
+                "status": "active",
+                "setup": "Listing content generated. Submit manually to each directory.",
+                "auto_publish": False,
+            },
+        },
+        "auto_publishable": ["wordpress", "medium", "blogger", "wordpress_com", "tumblr", "pinterest"],
+        "content_ready": ["social", "tiktok", "gbp", "reddit", "quora", "directories"],
+    }
+
+
+@app.post("/publish")
+async def publish_content(req: PublishRequest):
+    """Publish AIC result across all connected channels (dry_run=True by default)."""
+    import os
+    from execution.publisher import MultiChannelPublisher
+    from execution.connectors.social import SocialConnector, TikTokConnector, GBPConnector
+    publisher = MultiChannelPublisher()
+    publisher.register("social", SocialConnector())
+    publisher.register("tiktok", TikTokConnector())
+    publisher.register("gbp", GBPConnector())
+
+    # Auto-register WordPress if configured
+    wp_url = os.getenv("WP_URL")
+    wp_user = os.getenv("WP_USER")
+    wp_pass = os.getenv("WP_APP_PASSWORD")
+    if wp_url and wp_user and wp_pass:
+        from execution.connectors.wordpress import WordPressConnector
+        publisher.register("wordpress", WordPressConnector(wp_url, wp_user, wp_pass))
+
+    # Auto-register Medium if configured
+    medium_token = os.getenv("MEDIUM_TOKEN")
+    if medium_token:
+        from execution.connectors.external.medium import MediumConnector
+        publisher.register("medium", MediumConnector(medium_token))
+    # WordPress only if configured
+    report = await publisher.publish_aic_result(req.aic_result, dry_run=req.dry_run)
+    return report.model_dump()
+
+
+# --- Full Power ---
+
+class FullPowerRequest(BaseModel):
+    business: BusinessContext
+    business_id: str = "default"
+
+
+@app.post("/full-power")
+async def full_power(req: FullPowerRequest):
+    """Run ALL system capabilities — analysis + CTR + SERP hijack + rapid updates + competitor reaction + signal burst + authority gap + suppression + AI visibility."""
+    from core.full_power import run_full_power
+    report = await run_full_power(req.business, req.business_id)
+    return report.model_dump()
+
+
+# --- Analysis ---
+
+@app.post("/analyze", response_model=TaskBatch)
+async def analyze(req: AnalyzeRequest):
+    """Single-brain mode: 1 Claude call → scored tasks."""
+    return await brain.analyze(
+        business=req.business,
+        input_type=req.input_type,
+        max_actions=req.max_actions,
+    )
+
+
+@app.post("/orchestrate", response_model=OrchestrateResponse)
+async def orchestrate(req: OrchestrateRequest):
+    """Multi-agent mode: 4-5 chained Claude calls → deep analysis."""
+    batch, plog = await orchestrator.run(
+        business=req.business,
+        input_type=req.input_type,
+        disagreement_mode=req.disagreement_mode,
+    )
+    return OrchestrateResponse(tasks=batch, pipeline_log=plog.to_dict())
+
+
+# --- Data ---
+
+@app.post("/ingest", response_model=IngestResponse)
+async def ingest(req: IngestRequest):
+    """Pull live data from all sources."""
+    data = await pipeline.run_full(
+        business=req.business,
+        business_id=req.business_id,
+        skip_gsc=req.skip_gsc,
+        skip_gbp=req.skip_gbp,
+        skip_crawl=req.skip_crawl,
+        skip_competitors=req.skip_competitors,
+        skip_keywords=req.skip_keywords,
+    )
+    return IngestResponse(
+        agent_context=data.to_agent_context(),
+        freshness=data.freshness.to_prompt_block(),
+        events=[e.model_dump() for e in data.events],
+        data_sources={
+            name: {"confidence": src.confidence, "freshness": src.freshness.value}
+            for name, src in data.freshness.sources.items()
+        },
+    )
+
+
+# --- Execution ---
+
+@app.post("/execute", response_model=ExecuteResponse)
+async def execute(req: ExecuteRequest):
+    """Execute a batch of tasks (respects execution_mode + safety)."""
+    results = await executor.execute_batch(
+        tasks=req.tasks,
+        business=req.business,
+        business_id=req.business_id,
+        force_shadow=req.shadow_mode,
+    )
+
+    executed = sum(1 for r in results if r.status.value == "success")
+    queued = sum(1 for r in results if r.status.value == "queued")
+    skipped = sum(1 for r in results if r.status.value == "skipped")
+    failed = sum(1 for r in results if r.status.value == "failed")
+
+    return ExecuteResponse(
+        results=[r.model_dump() for r in results],
+        executed=executed,
+        queued=queued,
+        skipped=skipped,
+        failed=failed,
+    )
+
+
+@app.post("/approve")
+async def approve(req: ApproveRequest):
+    """Approve a queued ASSISTED task for execution."""
+    result = await executor.approve_task(req.task_id, req.business_id)
+    return result.model_dump()
+
+
+@app.post("/rollback")
+async def rollback(req: RollbackRequest):
+    """Roll back a previously executed task."""
+    result = await executor.rollback(req.task_id)
+    return result.model_dump()
+
+
+# --- Learning ---
+
+@app.post("/learn", response_model=LearningReport)
+async def learn(req: LearnRequest):
+    """Run a learning cycle (weekly or monthly)."""
+    if req.cycle == "weekly":
+        return await learner.weekly_cycle(req.business_id)
+    else:
+        return await learner.monthly_cycle(req.business_id)
+
+
+@app.get("/patterns")
+async def get_patterns():
+    """Get all learned action patterns."""
+    all_patterns = await patterns.get_all_patterns()
+    return [p.model_dump() for p in all_patterns]
+
+
+# --- Full Pipeline ---
+
+@app.post("/run", response_model=FullRunResponse)
+async def full_run(req: FullRunRequest):
+    """Full pipeline: ingest → agents → execute → store.
+    The primary production endpoint."""
+    # 1. Ingest live data
+    data = await pipeline.run_full(
+        business=req.business,
+        business_id=req.business_id,
+        skip_gsc=req.skip_gsc,
+        skip_gbp=req.skip_gbp,
+        skip_crawl=req.skip_crawl,
+        skip_competitors=req.skip_competitors,
+        skip_keywords=req.skip_keywords,
+    )
+
+    # 2. Multi-agent analysis
+    batch, plog = await orchestrator.run(
+        business=req.business,
+        input_type=req.input_type,
+        disagreement_mode=req.disagreement_mode,
+    )
+
+    # 3. Apply freshness penalty
+    penalty = data.freshness.confidence_penalty()
+    if penalty > 0:
+        for task in batch.tasks:
+            task.confidence_score = max(1.0, task.confidence_score - penalty)
+
+    # 4. Apply pattern learning adjustments
+    for task in batch.tasks:
+        pattern = await patterns.get_pattern(task.action, task.type.value)
+        adj = patterns.confidence_adjustment(pattern)
+        if adj != 0:
+            task.confidence_score = max(1.0, min(10.0, task.confidence_score + adj))
+
+    # 5. Execute (if enabled)
+    exec_results = []
+    if req.auto_execute:
+        results = await executor.execute_batch(
+            tasks=batch.tasks,
+            business=req.business,
+            business_id=req.business_id,
+            force_shadow=req.shadow_mode,
+        )
+        exec_results = [r.model_dump() for r in results]
+
+    # 6. Save tasks
+    await db.save_tasks(req.business_id, [t.model_dump() for t in batch.tasks])
+
+    return FullRunResponse(
+        tasks=batch,
+        execution_results=exec_results,
+        events=[e.model_dump() for e in data.events],
+        freshness=data.freshness.overall_confidence(),
+        pipeline_log=plog.to_dict(),
+    )
+
+
+# --- Utility ---
+
+@app.post("/score", response_model=ScoreResponse)
+async def score(req: ScoreRequest):
+    """Score/re-score tasks server-side without calling Claude."""
+    ranked, filtered = score_and_rank(req.tasks, apply_filters=req.apply_filters)
+    return ScoreResponse(tasks=ranked, filtered_count=filtered)
+
+
+@app.post("/context-preview")
+async def context_preview(business: BusinessContext):
+    """Preview the prompt block that gets sent to Claude."""
+    return {"prompt_block": business.to_prompt_block()}
+
+
+# --- Prediction ---
+
+class PredictRequest(BaseModel):
+    url: str
+    keyword: str
+    current_rank: int = 0
+    word_count: int = 0
+    keyword_in_title: bool = False
+    keyword_in_h1: bool = False
+    heading_count: int = 0
+    backlink_count: int = 0
+    domain_authority: float = 0
+    ctr: float = 0
+    days_since_update: int = 30
+    competitor_avg_authority: float = 0
+    competitor_avg_words: int = 0
+
+
+@app.post("/predict")
+async def predict_rank(req: PredictRequest):
+    """Predict ranking position and generate gap analysis."""
+    from prediction.scoring import score_page, analyze_gap, build_timeline
+    ps = score_page(**req.model_dump())
+    gap = analyze_gap(ps, {
+        "avg_word_count": req.competitor_avg_words or 1200,
+        "avg_backlinks": 5,
+        "page_backlinks": req.backlink_count,
+        "page_word_count": req.word_count,
+    })
+    tl = build_timeline(ps, gap)
+    return {
+        "page_score": ps.model_dump(),
+        "gap": gap.model_dump(),
+        "timeline": tl.model_dump(),
+    }
+
+
+# --- Channels ---
+
+class MultiplyRequest(BaseModel):
+    keyword: str
+    business: BusinessContext
+
+
+@app.post("/multiply")
+async def multiply_content(req: MultiplyRequest):
+    """Generate a full content bundle (5 formats) from one keyword."""
+    from channels.multiplier import ContentMultiplier
+    multiplier = ContentMultiplier()
+    bundle = await multiplier.multiply(req.keyword, req.business)
+    return bundle.model_dump()
+
+
+# --- Market Domination ---
+
+class DominationRequest(BaseModel):
+    keyword: str
+    business: BusinessContext
+    existing_pages: list[str] = []
+
+
+@app.post("/dominate")
+async def dominate_market(req: DominationRequest):
+    """Plan full market domination for a keyword cluster."""
+    from strategy.domination import MarketDominator
+    dominator = MarketDominator()
+    plan = await dominator.analyze_market(
+        keyword=req.keyword,
+        business_name=req.business.business_name,
+        service=req.business.primary_service,
+        city=req.business.primary_city,
+        existing_pages=req.existing_pages,
+    )
+    return plan.model_dump()
+
+
+# --- Cross-Business Learning ---
+
+class CrossLearnRequest(BaseModel):
+    business_ids: list[str]
+
+
+@app.post("/cross-learn")
+async def cross_learn(req: CrossLearnRequest):
+    """Aggregate learnings across all managed businesses."""
+    from strategy.cross_business import CrossBusinessLearner
+    learner = CrossBusinessLearner(db)
+    report = await learner.aggregate_patterns(req.business_ids)
+    return report.model_dump()
+
+
+# --- Signal Burst ---
+
+class BurstRequest(BaseModel):
+    keyword: str
+    page_url: str
+    position: int
+    business: BusinessContext
+    intensity: Literal["low", "medium", "high"] | None = None
+
+
+@app.post("/burst")
+async def signal_burst(req: BurstRequest):
+    """Plan a signal burst campaign — controlled spike of activity for ranking push."""
+    from signals.burst import SignalBurstEngine, BurstIntensity
+    engine = SignalBurstEngine()
+
+    if not engine.should_burst(req.position):
+        return {"eligible": False, "reason": f"Position #{req.position} not in burst range (4-10)"}
+
+    intensity = BurstIntensity(req.intensity) if req.intensity else None
+    plan = await engine.plan_burst(
+        keyword=req.keyword,
+        page_url=req.page_url,
+        position=req.position,
+        business_name=req.business.business_name,
+        city=req.business.primary_city,
+        intensity=intensity,
+    )
+    return {"eligible": True, "plan": plan.model_dump()}
+
+
+# --- Authority Gap ---
+
+class AuthorityGapRequest(BaseModel):
+    keyword: str
+    our_da: float
+    our_links: int
+    competitor_name: str
+    competitor_da: float
+    competitor_links: int
+    business: BusinessContext
+
+
+@app.post("/authority-gap")
+async def authority_gap(req: AuthorityGapRequest):
+    """Calculate authority gap and generate a link building plan to close it."""
+    from prediction.authority_gap import AuthorityGapAccelerator
+    accel = AuthorityGapAccelerator()
+
+    gap = accel.calculate_gap(
+        keyword=req.keyword,
+        our_da=req.our_da,
+        our_links=req.our_links,
+        competitor_name=req.competitor_name,
+        competitor_da=req.competitor_da,
+        competitor_links=req.competitor_links,
+    )
+
+    plan = await accel.generate_plan(
+        gap=gap,
+        business_name=req.business.business_name,
+        city=req.business.primary_city,
+        keyword=req.keyword,
+    )
+
+    return {
+        "gap": gap.model_dump(),
+        "plan": plan.model_dump(),
+        "quick_recommendation": accel.recommend_strategy(gap),
+    }
+
+
+# --- Rapid Update ---
+
+class RapidUpdateRequest(BaseModel):
+    page_url: str
+    keyword: str
+    business: BusinessContext
+    position: int = 0
+    update_number: int = 1
+    previous_updates: list[str] = []
+
+
+@app.post("/rapid-update")
+async def rapid_update(req: RapidUpdateRequest):
+    """Generate incremental page updates for freshness-driven ranking."""
+    from prediction.rapid_update import RapidUpdateEngine
+    engine = RapidUpdateEngine(db)
+    plan = await engine.generate_updates(
+        page_url=req.page_url,
+        keyword=req.keyword,
+        business_name=req.business.business_name,
+        city=req.business.primary_city,
+        position=req.position,
+        update_number=req.update_number,
+        previous_updates=req.previous_updates,
+    )
+    return plan.model_dump()
+
+
+class StagnantRequest(BaseModel):
+    rankings: dict[str, int]
+
+
+@app.post("/rapid-update/detect")
+async def detect_stagnant(req: StagnantRequest):
+    """Find stagnant pages that need rapid updates."""
+    from prediction.rapid_update import RapidUpdateEngine
+    engine = RapidUpdateEngine(db)
+    return engine.find_stagnant_pages(req.rankings)
+
+
+# --- Competitor Reaction ---
+
+class CompetitorReactionRequest(BaseModel):
+    our_rankings: dict[str, int]
+    previous_rankings: dict[str, int] = {}
+    competitor_rankings: dict[str, dict[str, int]] = {}
+    previous_competitor_rankings: dict[str, dict[str, int]] = {}
+    business: BusinessContext
+
+
+@app.post("/competitor-react")
+async def competitor_react(req: CompetitorReactionRequest):
+    """Detect competitor moves and generate counter-actions."""
+    from prediction.competitor_reaction import CompetitorReactor
+    reactor = CompetitorReactor()
+
+    moves = reactor.detect_moves(
+        our_rankings=req.our_rankings,
+        previous_rankings=req.previous_rankings,
+        competitor_rankings=req.competitor_rankings,
+        previous_competitor_rankings=req.previous_competitor_rankings,
+    )
+
+    if not moves:
+        return {"moves": [], "reactions": []}
+
+    plans = await reactor.react_to_all(
+        moves=moves,
+        business_name=req.business.business_name,
+        city=req.business.primary_city,
+    )
+
+    return {
+        "moves": [m.model_dump() for m in moves],
+        "reactions": [p.model_dump() for p in plans],
+    }
+
+
+# --- CTR Domination ---
+
+class CTRTestRequest(BaseModel):
+    page_url: str
+    keyword: str
+    current_title: str = ""
+    current_meta: str = ""
+    current_ctr: float = 0.0
+    position: int = 0
+    impressions: int = 0
+    business: BusinessContext
+
+
+@app.post("/ctr/generate")
+async def ctr_generate(req: CTRTestRequest):
+    """Generate 3 CTR-optimized title/meta variants for A/B testing."""
+    from prediction.ctr import CTRDominator
+    ctr = CTRDominator(db)
+    variants = await ctr.generate_variants(
+        page_url=req.page_url,
+        keyword=req.keyword,
+        current_title=req.current_title,
+        current_meta=req.current_meta,
+        current_ctr=req.current_ctr,
+        position=req.position,
+        impressions=req.impressions,
+        business_name=req.business.business_name,
+        city=req.business.primary_city,
+        reviews=req.business.reviews_count,
+    )
+    return [v.model_dump() for v in variants]
+
+
+class CTRDetectRequest(BaseModel):
+    gsc_data: list[dict]
+    min_impressions: int = 100
+
+
+@app.post("/ctr/detect")
+async def ctr_detect(req: CTRDetectRequest):
+    """Detect low-CTR pages that should be tested."""
+    from prediction.ctr import CTRDominator
+    ctr = CTRDominator(db)
+    return ctr.detect_low_ctr_pages(req.gsc_data, req.min_impressions)
+
+
+# --- SERP Hijack ---
+
+class SERPHijackRequest(BaseModel):
+    keyword: str
+    business: BusinessContext
+    current_position: int = 0
+
+
+@app.post("/serp-hijack")
+async def serp_hijack(req: SERPHijackRequest):
+    """Plan a SERP hijack cluster — multiple pages targeting one keyword."""
+    from prediction.serp_hijack import SERPHijacker
+    hijacker = SERPHijacker()
+    cluster = await hijacker.plan_cluster(
+        keyword=req.keyword,
+        business_name=req.business.business_name,
+        service=req.business.primary_service,
+        city=req.business.primary_city,
+        current_position=req.current_position,
+    )
+    return cluster.model_dump()
+
+
+# --- Signal + Suppression ---
+
+class SuppressionRequest(BaseModel):
+    our_keywords: dict[str, int]
+    competitor_keywords: dict[str, dict]
+    competitor_links: dict[str, int] = {}
+    our_link_count: int = 0
+
+
+@app.post("/suppression")
+async def suppression_analysis(req: SuppressionRequest):
+    """Analyze competitive suppression opportunities."""
+    from signals.suppression import analyze_suppression_opportunities
+    actions = analyze_suppression_opportunities(
+        our_keywords=req.our_keywords,
+        competitor_keywords=req.competitor_keywords,
+        competitor_links=req.competitor_links,
+        our_link_count=req.our_link_count,
+    )
+    return [a.model_dump() for a in actions]
+
+
+class PressureRequest(BaseModel):
+    keyword: str
+    cluster_keywords: list[str] = []
+    intensity: Literal["standard", "aggressive", "blitz"] = "standard"
+
+
+@app.post("/pressure")
+async def pressure_campaign(req: PressureRequest):
+    """Plan a multi-channel pressure campaign for a keyword."""
+    from signals.pressure import PressureEngine
+    engine = PressureEngine()
+    campaign = engine.plan_campaign(req.keyword, req.cluster_keywords, None, req.intensity)
+    return campaign.model_dump()
+
+
+class DemandRequest(BaseModel):
+    keyword: str
+    business: BusinessContext
+
+
+@app.post("/demand")
+async def demand_campaign(req: DemandRequest):
+    """Generate a demand generation campaign (branded search driving)."""
+    from signals.demand import DemandEngine
+    engine = DemandEngine()
+    campaign = await engine.create_campaign(req.keyword, req.business)
+    return campaign.model_dump()
+
+
+# --- Entity ---
+
+@app.post("/entity-audit")
+async def entity_audit(business: BusinessContext):
+    """Run entity dominance audit — find gaps in how Google sees the brand."""
+    from entity.dominance import EntityEngine
+    engine = EntityEngine()
+    profile, actions = await engine.audit(business)
+    return {"profile": profile.model_dump(), "actions": [a.model_dump() for a in actions]}
+
+
+@app.post("/entity-schema")
+async def entity_schema(business: BusinessContext):
+    """Generate comprehensive schema.org JSON-LD markup."""
+    from entity.dominance import EntityEngine
+    return EntityEngine.generate_schema_markup(business)
+
+
+# --- Autonomous ---
+
+class AutonomousRunRequest(BaseModel):
+    business: BusinessContext
+    business_id: str
+    shadow_mode: bool = True
+    max_auto_executions: int = 3
+    min_confidence: float = 7.0
+
+
+@app.post("/autonomous")
+async def autonomous_cycle(req: AutonomousRunRequest):
+    """Run one full autonomous cycle — data → agents → execute → learn."""
+    from strategy.autonomous import AutonomousRunner, AutonomousConfig
+    config = AutonomousConfig(
+        business_id=req.business_id,
+        business=req.business,
+        shadow_mode=req.shadow_mode,
+        max_auto_executions_per_day=req.max_auto_executions,
+        min_confidence_for_auto=req.min_confidence,
+    )
+    runner = AutonomousRunner(config)
+    result = await runner.run_cycle()
+    return result.model_dump()
+
+
+# --- Cognitive System ---
+
+class CognitiveRequest(BaseModel):
+    business: BusinessContext
+    business_id: str
+    goal_keyword: str | None = None
+    target_position: int = 3
+    execute: bool = False
+
+
+@app.post("/cognitive")
+async def cognitive_cycle(req: CognitiveRequest):
+    """Run one cognitive cycle: perceive → plan → execute → reflect → learn."""
+    from core.cognitive import CognitiveSystem
+    system = CognitiveSystem(db)
+    result = await system.run_cycle(
+        business=req.business,
+        business_id=req.business_id,
+        goal_keyword=req.goal_keyword,
+        target_position=req.target_position,
+        execute=req.execute,
+    )
+    return result.model_dump()
+
+
+@app.post("/plan")
+async def create_plan(req: CognitiveRequest):
+    """Create a multi-step plan with dependencies (no execution)."""
+    from core.planner.engine import PlanningEngine
+    from core.world_model.state import WorldModel
+    planner = PlanningEngine()
+    world = WorldModel(db)
+    state = await world.get_state(req.business_id)
+    world_block = world.to_prompt_block(state)
+
+    keyword = req.goal_keyword or (req.business.primary_keywords[0] if req.business.primary_keywords else req.business.primary_service)
+    position = req.business.current_rankings.get(keyword, 0)
+
+    plan = await planner.create_plan(
+        keyword=keyword,
+        current_position=position,
+        target_position=req.target_position,
+        business_name=req.business.business_name,
+        city=req.business.primary_city,
+        world_state_block=world_block,
+    )
+    return plan.model_dump()
+
+
+# ---- Run ----
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("api.server:app", host="0.0.0.0", port=PORT, reload=False)
