@@ -740,6 +740,12 @@ REQUIREMENTS:
 - 1 FAQ section (5 Q&A pairs) with FAQPage schema
 - LocalBusiness schema with address, service, areaServed
 
+REQUIRED E-E-A-T ELEMENTS (include ALL of these in content_html):
+1. Author byline immediately after the H1: <div class="author-bio" style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;margin:16px 0"><div><strong style="color:#1e3a5f">Written by the Blend Bright Lights Team</strong><br><small style="color:#6b7280">Licensed exterior contractors serving the Okanagan since 2019. Certified LED lighting installers and home exterior specialists with 500+ completed projects across Kelowna and surrounding communities.</small></div></div>
+2. One representative customer quote (clearly labeled): <blockquote style="border-left:3px solid #1e40af;padding:12px 16px;margin:16px 0;background:#f0f7ff"><em>"[specific quote about the service and Okanagan location]"</em><br><small>— Homeowner, [Okanagan town], BC</small></blockquote>
+3. Company credentials paragraph: mention licensing, years in business (since 2019), service area (100km radius from Kelowna), and warranty offerings.
+4. Company footer at the very end of content_html: <div class="company-footer" style="background:#1e3a5f;color:white;padding:20px;border-radius:8px;margin-top:24px"><h3 style="color:white;margin:0 0 8px;font-size:16px">About Blend Bright Lights</h3><p style="margin:0;font-size:14px;line-height:1.6">Licensed exterior service contractors based in Kelowna, BC. Serving all Okanagan communities within 100km — Vernon, Penticton, West Kelowna, Lake Country, Peachland, Summerland, Oliver, Osoyoos, Armstrong, Enderby, Lumby, Princeton and Rutland. <strong>Phone:</strong> 778.363.6289 &nbsp;|&nbsp; <strong>Email:</strong> Contact@blendbrightlights.com &nbsp;|&nbsp; <strong>Website:</strong> blendbrightlights.com</p></div>
+
 Return ONLY valid JSON:
 {{
   "title": "",
@@ -2271,3 +2277,84 @@ def submit_sitemap(self) -> dict:
                     log.debug("submit_sitemap.skip  engine=%s  err=%s", engine, e)
 
     return {"status": "done", "submitted": submitted, "task_id": self.request.id}
+
+
+@app.task(bind=True, queue='execution', max_retries=1, name='taskq.tasks.run_gbp_posts')
+def run_gbp_posts(self) -> dict:
+    """Generate and post (or draft) GBP updates for all businesses. Runs weekly."""
+    import json
+    from pathlib import Path
+    from core.aion_bridge import aion
+    log.info('run_gbp_posts.start  task_id=%s', self.request.id)
+    biz_file = Path('data/storage/businesses.json')
+    if not biz_file.exists():
+        return {'status': 'no_businesses'}
+    businesses = json.loads(biz_file.read_text())
+    posted = 0
+    for biz in businesses:
+        name = biz.get('name', '')
+        service = biz.get('primary_service', '')
+        city = biz.get('primary_city', biz.get('city', ''))
+        phone = biz.get('phone', '778.363.6289')
+        website = biz.get('website', '')
+        try:
+            prompt = f"""Write a Google Business Profile post (150-200 words) for {name}.
+Service: {service} in {city}, BC.
+Phone: {phone} | Website: {website}
+Make it engaging, mention a seasonal benefit or local relevance, include a clear call to action.
+Write in plain text only -- no HTML tags."""
+            text = aion.brain_complete(prompt, model='groq', max_tokens=300)
+            if not text:
+                continue
+            from execution.gbp.gbp_publisher import GBPPublisher, GBPPost
+            gbp = GBPPublisher(
+                account_id=biz.get('gbp_account_id',''),
+                location_id=biz.get('gbp_location_id',''),
+                credentials_path=biz.get('gbp_credentials_path',''),
+            )
+            post = GBPPost(
+                summary=text[:1500],
+                call_to_action='CALL',
+                cta_url=website,
+            )
+            result = gbp.post(post)
+            posted += 1
+            log.info('run_gbp_posts.done  biz=%s  status=%s', name, result.get('status'))
+        except Exception as e:
+            log.warning('run_gbp_posts.fail  biz=%s  err=%s', name, e)
+    return {'status': 'done', 'posted': posted, 'task_id': self.request.id}
+
+
+@app.task(bind=True, queue='execution', max_retries=1, name='taskq.tasks.run_citation_builder')
+def run_citation_builder(self) -> dict:
+    """Generate citation submission packages for all businesses. Runs on registration."""
+    import json
+    from pathlib import Path
+    log.info('run_citation_builder.start  task_id=%s', self.request.id)
+    biz_file = Path('data/storage/businesses.json')
+    if not biz_file.exists():
+        return {'status': 'no_businesses'}
+    businesses = json.loads(biz_file.read_text())
+    generated = 0
+    for biz in businesses:
+        try:
+            from execution.citations.citation_builder import CitationBuilder, BusinessNAP
+            cb = CitationBuilder()
+            nap = BusinessNAP(
+                name=biz.get('name',''),
+                address=biz.get('primary_city', biz.get('city','')),
+                city=biz.get('primary_city', biz.get('city','')),
+                province=biz.get('state',''),
+                postal_code='',
+                phone=biz.get('phone',''),
+                website=biz.get('website',''),
+                email=biz.get('owner_email',''),
+                description=f"{biz.get('name','')} -- {biz.get('primary_service','')} in {biz.get('primary_city','')}",
+                services=biz.get('secondary_services', []) + [biz.get('primary_service','')],
+                categories=[biz.get('primary_service','')],
+            )
+            cb.generate_submission_package(nap)
+            generated += 1
+        except Exception as e:
+            log.warning('run_citation_builder.fail  biz=%s  err=%s', biz.get('name'), e)
+    return {'status': 'done', 'generated': generated, 'task_id': self.request.id}

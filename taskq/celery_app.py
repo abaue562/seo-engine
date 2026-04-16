@@ -106,6 +106,8 @@ app.conf.update(
         "taskq.tasks.send_daily_summary":    {"queue": "monitoring"},
         "taskq.tasks.send_ranking_report": {"queue": "monitoring"},
         "taskq.tasks.submit_sitemap": {"queue": "execution"},
+        "taskq.tasks.run_gbp_posts":          {"queue": "execution"},
+        "taskq.tasks.run_citation_builder":   {"queue": "execution"},
         # New Phase 2-14 tasks
         "taskq.tasks.run_programmatic_batch": {"queue": "execution"},
         "taskq.tasks.run_haro_check":         {"queue": "execution"},
@@ -205,6 +207,11 @@ app.conf.update(
         "submit-sitemap": {
             "task": "taskq.tasks.submit_sitemap",
             "schedule": 604800,
+            "options": {"queue": "execution"},
+        },
+        "run-gbp-posts": {
+            "task": "taskq.tasks.run_gbp_posts",
+            "schedule": 604800,         # 7 days
             "options": {"queue": "execution"},
         },
         # ── Phase 3 — AION wiring schedules ───────────────────────────────
