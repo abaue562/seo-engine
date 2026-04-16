@@ -74,6 +74,16 @@ def analyze_business(self, business_id: str, business_data: dict) -> dict:
         from core.agents.brain import SEOBrain
         from models.business import BusinessContext
 
+        # Normalize field names from DB format to BusinessContext format
+        if "name" in business_data and "business_name" not in business_data:
+            business_data["business_name"] = business_data["name"]
+        if "city" in business_data and "primary_city" not in business_data:
+            business_data["primary_city"] = business_data["city"]
+        if "services" in business_data and "primary_service" not in business_data:
+            services = business_data["services"]
+            business_data["primary_service"] = services[0] if services else ""
+        if "keywords" in business_data and "primary_keywords" not in business_data:
+            business_data["primary_keywords"] = business_data["keywords"]
         business = BusinessContext(**business_data)
         brain = SEOBrain()
         task_batch = _run_async(brain.analyze(business))
@@ -125,6 +135,16 @@ def orchestrate_business(self, business_id: str, business_data: dict) -> dict:
         from core.agents.orchestrator import AgentOrchestrator
         from models.business import BusinessContext
 
+        # Normalize field names from DB format to BusinessContext format
+        if "name" in business_data and "business_name" not in business_data:
+            business_data["business_name"] = business_data["name"]
+        if "city" in business_data and "primary_city" not in business_data:
+            business_data["primary_city"] = business_data["city"]
+        if "services" in business_data and "primary_service" not in business_data:
+            services = business_data["services"]
+            business_data["primary_service"] = services[0] if services else ""
+        if "keywords" in business_data and "primary_keywords" not in business_data:
+            business_data["primary_keywords"] = business_data["keywords"]
         business = BusinessContext(**business_data)
         orchestrator = AgentOrchestrator()
         pipeline_result = _run_async(orchestrator.run(business))
