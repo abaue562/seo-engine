@@ -31,26 +31,53 @@
     "name": "Blend Bright Lights",
     "domain": "blendbrightlights.com",
     "website": "https://blendbrightlights.com",
-    "primary_service": "permanent LED lighting installation",
-    "secondary_services": [],
+    "primary_service": "Permanent LED Lighting & Home Exterior Services",
+    "secondary_services": [
+      "Landscape Lighting",
+      "Gutter Guard Installation",
+      "Moss Removal",
+      "Window Cleaning",
+      "Gutter Cleaning & Repair",
+      "Roof Rejuvenation"
+    ],
     "primary_city": "Kelowna",
     "state": "BC",
     "service_areas": [
       "Kelowna",
-      "Okanagan",
       "West Kelowna",
+      "Lake Country",
+      "Peachland",
+      "Summerland",
+      "Penticton",
+      "Oliver",
+      "Osoyoos",
       "Vernon",
-      "Penticton"
+      "Armstrong",
+      "Enderby",
+      "Lumby",
+      "Princeton",
+      "Okanagan"
     ],
     "primary_keywords": [
-      "permanent LED lighting",
-      "roofline lighting",
-      "programmable LED lights",
-      "outdoor LED lighting Okanagan",
-      "landscape lighting Kelowna"
+      "permanent LED lighting Kelowna",
+      "roofline lighting Okanagan",
+      "landscape lighting Kelowna",
+      "programmable outdoor LED lights BC",
+      "gutter guard installation Kelowna",
+      "gutter guards Okanagan",
+      "moss removal Kelowna",
+      "roof moss removal Okanagan BC",
+      "window cleaning Kelowna",
+      "residential window cleaning Okanagan",
+      "gutter cleaning Kelowna",
+      "gutter repair Okanagan",
+      "roof rejuvenation Kelowna BC",
+      "roof cleaning restoration Okanagan",
+      "commercial exterior services Kelowna",
+      "commercial LED lighting Okanagan"
     ],
     "competitors": [],
-    "owner_email": "",
+    "owner_email": "Contact@blendbrightlights.com",
     "contact_name": "",
     "target_customer": "",
     "gbp_url": "",
@@ -62,6 +89,7 @@
     "wp_site_url": "https://homelights9.wordpress.com",
     "wp_username": "abaue562",
     "wp_app_password": "Seotest!23",
-    "wp_publish_status": "publish"
+    "wp_publish_status": "publish",
+    "service_radius_km": 100
   }
 ]
