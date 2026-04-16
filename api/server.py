@@ -2092,4 +2092,24 @@ async def business_status(business_id: str):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("api.server:app", host="0.0.0.0", port=PORT, reload=False)
+
+# Dashboard & Static Files
+import os as _os
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import HTMLResponse as _HTMLResponse
+
+_static_dir = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), '..', 'static')
+if _os.path.exists(_static_dir):
+    app.mount('/static', StaticFiles(directory=_static_dir), name='static')
+
+@app.get('/', response_class=_HTMLResponse, include_in_schema=False)
+async def dashboard():
+    _p = _os.path.join(_static_dir, 'dashboard.html')
+    with open(_p, encoding='utf-8') as _f:
+        return _f.read()
+
+@app.get('/signup', response_class=_HTMLResponse, include_in_schema=False)
+async def signup_page():
+    _p = _os.path.join(_static_dir, 'signup.html')
+    with open(_p, encoding='utf-8') as _f:
+        return _f.read()

@@ -104,6 +104,8 @@ app.conf.update(
         "taskq.tasks.run_citation_monitor":  {"queue": "monitoring"},
         "taskq.tasks.run_cwv_audit":         {"queue": "monitoring"},
         "taskq.tasks.send_daily_summary":    {"queue": "monitoring"},
+        "taskq.tasks.send_ranking_report": {"queue": "monitoring"},
+        "taskq.tasks.submit_sitemap": {"queue": "execution"},
         # New Phase 2-14 tasks
         "taskq.tasks.run_programmatic_batch": {"queue": "execution"},
         "taskq.tasks.run_haro_check":         {"queue": "execution"},
@@ -194,6 +196,16 @@ app.conf.update(
             "task": "taskq.tasks.sync_aion_signals",
             "schedule": 21600,          # 6 hours — AION Research Aggregator signals
             "options": {"queue": "analysis"},
+        },
+        "send-ranking-report": {
+            "task": "taskq.tasks.send_ranking_report",
+            "schedule": 604800,
+            "options": {"queue": "monitoring"},
+        },
+        "submit-sitemap": {
+            "task": "taskq.tasks.submit_sitemap",
+            "schedule": 604800,
+            "options": {"queue": "execution"},
         },
         # ── Phase 3 — AION wiring schedules ───────────────────────────────
         "sync-twitter-intel": {

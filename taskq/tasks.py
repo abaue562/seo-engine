@@ -2151,3 +2151,123 @@ def competitor_content_alerts(self) -> dict:
     except Exception as exc:
         log.exception("competitor_content_alerts.error  task_id=%s  exc=%s", self.request.id, exc)
         raise self.retry(exc=exc, countdown=300)
+
+
+# ===========================================================================
+# RANKING REPORT + SITEMAP TASKS
+# ===========================================================================
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.send_ranking_report")
+def send_ranking_report(self) -> dict:
+    """Send weekly ranking + published articles report to each business owner."""
+    import json, sqlite3
+    from pathlib import Path
+    log.info("send_ranking_report.start  task_id=%s", self.request.id)
+
+    biz_file = Path("data/storage/businesses.json")
+    if not biz_file.exists():
+        return {"status": "no_businesses"}
+
+    businesses = json.loads(biz_file.read_text())
+    reports_sent = 0
+
+    db_conn = sqlite3.connect("data/seo_engine.db")
+    db_conn.row_factory = sqlite3.Row
+
+    for biz in businesses:
+        domain = biz.get("domain", "")
+        name = biz.get("name", domain)
+        email = biz.get("owner_email", "")
+        if not email or not domain:
+            continue
+
+        rankings = db_conn.execute(
+            "SELECT keyword, position, checked_at FROM ranking_history WHERE domain=? ORDER BY checked_at DESC LIMIT 20",
+            (domain,)
+        ).fetchall()
+
+        published = db_conn.execute(
+            "SELECT url, published_at FROM published_urls WHERE domain=? ORDER BY published_at DESC LIMIT 10",
+            (domain,)
+        ).fetchall()
+
+        if rankings:
+            rows = ""
+            for r in rankings:
+                pos = r["position"]
+                color = "#22c55e" if pos <= 10 else "#f59e0b" if pos <= 20 else "#6b7280"
+                rows += f"<tr><td style='padding:8px'>{r['keyword']}</td><td style='text-align:center;color:{color};font-weight:bold;padding:8px'>#{pos}</td><td style='text-align:right;padding:8px;color:#6b7280'>{str(r['checked_at'])[:10]}</td></tr>"
+            rankings_html = f"<h3 style='margin:16px 0 8px'>Keyword Rankings</h3><table style='width:100%;border-collapse:collapse;font-size:14px'><tr style='border-bottom:2px solid #e2e8f0'><th style='text-align:left;padding:8px'>Keyword</th><th style='text-align:center;padding:8px'>Position</th><th style='text-align:right;padding:8px'>Checked</th></tr>{rows}</table>"
+        else:
+            rankings_html = "<p style='color:#6b7280;font-size:14px'>No ranking data yet — first check runs within 7 days of onboarding.</p>"
+
+        if published:
+            links = "".join(f"<li><a href='{p['url']}' style='color:#1e40af'>{p['url']}</a></li>" for p in published)
+            published_html = f"<h3 style='margin:16px 0 8px'>Published Articles ({len(published)})</h3><ul style='font-size:14px;line-height:2'>{links}</ul>"
+        else:
+            published_html = "<p style='color:#6b7280;font-size:14px'>No articles published yet.</p>"
+
+        html = f"""<html><body style='font-family:Arial,sans-serif;max-width:600px;margin:0 auto;padding:20px'>
+<div style='background:#1e40af;color:white;padding:20px;border-radius:8px 8px 0 0'>
+<h1 style='margin:0;font-size:22px'>SEO Weekly Report</h1>
+<p style='margin:5px 0 0;opacity:.8;font-size:14px'>{name} — {domain}</p>
+</div>
+<div style='background:#f8fafc;padding:24px;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 8px 8px'>
+<p style='font-size:15px'>Here is your weekly SEO performance summary for <strong>{domain}</strong>.</p>
+{rankings_html}
+<br>{published_html}
+<hr style='border:none;border-top:1px solid #e2e8f0;margin:20px 0'>
+<p style='color:#6b7280;font-size:12px'>Powered by SEO Engine — automated SEO for growing businesses.</p>
+</div></body></html>"""
+
+        try:
+            from core.aion_bridge import aion
+            sent = aion.send_email(
+                to_email=email,
+                subject=f"Weekly SEO Report — {name}",
+                body_html=html,
+                body_text=f"Weekly SEO Report for {name}. {len(rankings)} keywords tracked. {len(published)} articles published."
+            )
+            if sent:
+                reports_sent += 1
+                log.info("send_ranking_report.sent  biz=%s  email=%s", name, email)
+        except Exception as e:
+            log.warning("send_ranking_report.fail  biz=%s  err=%s", name, e)
+
+    db_conn.close()
+    return {"status": "done", "reports_sent": reports_sent, "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="execution", max_retries=2, name="taskq.tasks.submit_sitemap")
+def submit_sitemap(self) -> dict:
+    """Ping Google and Bing with sitemap URLs for all businesses with WordPress sites."""
+    import json, urllib.request
+    from pathlib import Path
+    log.info("submit_sitemap.start  task_id=%s", self.request.id)
+
+    biz_file = Path("data/storage/businesses.json")
+    if not biz_file.exists():
+        return {"status": "no_businesses"}
+
+    businesses = json.loads(biz_file.read_text())
+    submitted = 0
+
+    for biz in businesses:
+        wp_url = biz.get("wp_site_url", "")
+        if not wp_url:
+            continue
+        for sitemap_path in ["/sitemap.xml", "/sitemap_index.xml"]:
+            sitemap_url = f"{wp_url.rstrip('/')}{sitemap_path}"
+            for engine, ping_url in [
+                ("google", f"https://www.google.com/ping?sitemap={sitemap_url}"),
+                ("bing", f"https://www.bing.com/ping?sitemap={sitemap_url}"),
+            ]:
+                try:
+                    req = urllib.request.Request(ping_url, headers={"User-Agent": "SEOEngine/1.0"})
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        log.info("submit_sitemap.ok  engine=%s  sitemap=%s  status=%s", engine, sitemap_url, resp.status)
+                        submitted += 1
+                except Exception as e:
+                    log.debug("submit_sitemap.skip  engine=%s  err=%s", engine, e)
+
+    return {"status": "done", "submitted": submitted, "task_id": self.request.id}
