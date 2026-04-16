@@ -48,7 +48,7 @@ services:
   seo-worker:
     build: .
     container_name: seo-engine-worker
-    command: celery -A queue.celery_app worker -Q analysis,execution,learning,monitoring --loglevel=info --concurrency=4
+    command: celery -A taskq.celery_app worker -Q analysis,execution,learning,monitoring --loglevel=info --concurrency=4
     env_file:
       - config/.env
     environment:
@@ -68,7 +68,7 @@ services:
   seo-beat:
     build: .
     container_name: seo-engine-beat
-    command: celery -A queue.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler
+    command: celery -A taskq.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler
     env_file:
       - config/.env
     environment:

@@ -4,7 +4,8 @@ from dotenv import load_dotenv
 
 _config_dir = Path(__file__).parent
 load_dotenv(_config_dir / ".env")
-load_dotenv(_config_dir / ".env.example")
+# NOTE: .env.example is NOT loaded here — it's documentation only.
+# Copy it to .env and fill in real values.
 
 # ── AI ───────────────────────────────────────────────────────────────────────
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -65,3 +66,45 @@ AUTONOMOUS_MODE = os.getenv("AUTONOMOUS_MODE", "shadow")       # shadow | assist
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.7"))
 MAX_DAILY_EXECUTIONS = int(os.getenv("MAX_DAILY_EXECUTIONS", "5"))
 RUNNER_LOOP_HOURS = int(os.getenv("RUNNER_LOOP_HOURS", "24"))
+
+# ── Publishing — WordPress (primary) ─────────────────────────────────────────
+# WP_APP_PASSWORD: Settings → Users → Application Passwords in WP admin
+WP_URL = os.getenv("WP_URL", "")
+WP_USER = os.getenv("WP_USER", "")
+WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD", "")
+# draft | publish  — set 'publish' to auto-publish, 'draft' to review first
+WP_PUBLISH_STATUS = os.getenv("WP_PUBLISH_STATUS", "draft")
+
+# ── Publishing — Medium ───────────────────────────────────────────────────────
+# Get at: medium.com/me/settings/security → Integration Tokens
+MEDIUM_TOKEN = os.getenv("MEDIUM_TOKEN", "")
+MEDIUM_PUBLISH_STATUS = os.getenv("MEDIUM_PUBLISH_STATUS", "draft")  # draft | public
+
+# ── Publishing — Blogger ─────────────────────────────────────────────────────
+BLOGGER_BLOG_ID = os.getenv("BLOGGER_BLOG_ID", "")
+
+# ── Publishing — WordPress.com ───────────────────────────────────────────────
+WP_COM_SITE = os.getenv("WP_COM_SITE", "")
+WP_COM_TOKEN = os.getenv("WP_COM_TOKEN", "")
+
+# ── Link injection ────────────────────────────────────────────────────────────
+# Max existing posts to scan and patch with inbound links per new page
+LINK_INJECT_MAX_POSTS = int(os.getenv("LINK_INJECT_MAX_POSTS", "20"))
+# Minimum word match score (0-1) to consider a post eligible for link injection
+LINK_INJECT_RELEVANCE_THRESHOLD = float(os.getenv("LINK_INJECT_RELEVANCE_THRESHOLD", "0.3"))
+# Max % of injected anchors that can be exact-match (Penguin protection)
+LINK_ANCHOR_EXACT_MAX_PCT = float(os.getenv("LINK_ANCHOR_EXACT_MAX_PCT", "0.15"))
+
+# ── Content quality gates ─────────────────────────────────────────────────────
+MIN_WORD_COUNT = int(os.getenv("MIN_WORD_COUNT", "700"))
+SCHEMA_VALIDATE = os.getenv("SCHEMA_VALIDATE", "true")
+
+# ── AI Citation monitoring ────────────────────────────────────────────────────
+PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY", "")
+OPENAI_API_KEY     = os.getenv("OPENAI_API_KEY", "")     # for ChatGPT citation testing
+GA4_MEASUREMENT_ID = os.getenv("GA4_MEASUREMENT_ID", "") # G-XXXXXXXXXX format
+
+# ── Conversion layer ──────────────────────────────────────────────────────────
+# Default phone/email injected into CTAs if not set on individual business
+DEFAULT_PHONE = os.getenv("DEFAULT_PHONE", "")
+DEFAULT_EMAIL = os.getenv("DEFAULT_EMAIL", "")

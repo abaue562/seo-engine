@@ -38,6 +38,8 @@ class RankTracker:
     """
 
     STORAGE_PATH = Path("data/storage/rank_history")
+    REGISTRY_PATH = Path("data/storage/rank_registry.json")
+    BUSINESSES_PATH = Path("data/storage/businesses.json")
 
     def __init__(self, storage_path: Optional[Path] = None):
         self.storage = storage_path or self.STORAGE_PATH
@@ -51,6 +53,85 @@ class RankTracker:
             from data.connectors.dataforseo import DataForSEOClient
             self._dfs_client = DataForSEOClient()
         return self._dfs_client
+
+    # ── Registration (keyword + URL tracking) ─────────────────────────────────
+
+    async def register(self, keyword: str, url: str) -> None:
+        """Register a keyword + URL pair for ongoing rank tracking.
+
+        Called by the content pipeline after a new page is published.
+        Stored in data/storage/rank_registry.json as {keyword: url}.
+        """
+        registry: dict = {}
+        if self.REGISTRY_PATH.exists():
+            try:
+                registry = json.loads(self.REGISTRY_PATH.read_text())
+            except Exception:
+                registry = {}
+
+        registry[keyword] = url
+        self.REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        self.REGISTRY_PATH.write_text(json.dumps(registry, indent=2))
+        log.info("rank_tracker.registered  keyword=%s  url=%s", keyword, url)
+
+    def _load_registry(self) -> dict:
+        """Return {keyword: url} registry dict."""
+        if not self.REGISTRY_PATH.exists():
+            return {}
+        try:
+            return json.loads(self.REGISTRY_PATH.read_text())
+        except Exception:
+            return {}
+
+    def _load_business(self, business_id: str) -> dict:
+        """Load a business record from businesses.json by id."""
+        if not self.BUSINESSES_PATH.exists():
+            return {}
+        try:
+            businesses = json.loads(self.BUSINESSES_PATH.read_text())
+            for biz in businesses:
+                if (biz.get("id") or biz.get("business_id")) == business_id:
+                    return biz
+        except Exception:
+            pass
+        return {}
+
+    def get_summary_by_id(self, business_id: str) -> dict:
+        """Convenience wrapper: look up domain + keywords from businesses.json
+        and call get_summary_report().
+
+        Args:
+            business_id: The id field from data/storage/businesses.json.
+
+        Returns:
+            Summary report dict, or {"error": ...} if business not found.
+        """
+        biz = self._load_business(business_id)
+        if not biz:
+            log.warning("rank_tracker.business_not_found  id=%s", business_id)
+            return {"error": f"business_id {business_id!r} not found in businesses.json"}
+
+        domain = (
+            biz.get("website", "")
+            .replace("https://", "")
+            .replace("http://", "")
+            .rstrip("/")
+        )
+        keywords = biz.get("primary_keywords", [])
+
+        # Also include any keywords registered via register()
+        registry_keywords = list(self._load_registry().keys())
+        all_keywords = list(dict.fromkeys(keywords + registry_keywords))  # dedupe, preserve order
+
+        if not domain or not all_keywords:
+            return {
+                "business_id": business_id,
+                "domain": domain,
+                "keywords": all_keywords,
+                "note": "No domain or keywords configured — add to businesses.json",
+            }
+
+        return self.get_summary_report(domain, all_keywords)
 
     # ── Core ranking check ────────────────────────────────────────────────────
 

@@ -17,9 +17,10 @@ class TaskType(str, Enum):
 
 
 class ExecutionMode(str, Enum):
-    AUTO = "AUTO"          # System can do it (publish, update, etc.)
-    MANUAL = "MANUAL"      # User must act
-    ASSISTED = "ASSISTED"  # User clicks, system helps
+    AUTO = "AUTO"          # System executes live
+    MANUAL = "MANUAL"      # User must act; system only generates instructions
+    ASSISTED = "ASSISTED"  # System generates content; user approves before publish
+    SHADOW = "shadow"      # Execute internally but do not publish (dry-run)
 
 
 class TaskRole(str, Enum):

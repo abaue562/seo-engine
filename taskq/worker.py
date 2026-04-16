@@ -4,11 +4,11 @@
 Usage
 -----
 Run with all queues (recommended for development):
-    python -m queue.worker
+    python -m taskq.worker
 
 Run specific queues (recommended for production):
-    celery -A queue.celery_app worker -Q analysis,execution --loglevel=info
-    celery -A queue.celery_app worker -Q learning,monitoring --loglevel=info
+    celery -A taskq.celery_app worker -Q analysis,execution --loglevel=info
+    celery -A taskq.celery_app worker -Q learning,monitoring --loglevel=info
 
 Environment variables
 ---------------------
@@ -22,14 +22,14 @@ from __future__ import annotations
 import os
 import sys
 
-# Ensure project root is on the path when running as `python -m queue.worker`
+# Ensure project root is on the path when running as `python -m taskq.worker`
 from pathlib import Path
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
-from queue.celery_app import app  # noqa: E402 — must come after sys.path fixup
+from taskq.celery_app import app  # noqa: E402 — must come after sys.path fixup
 
 
 def main() -> None:

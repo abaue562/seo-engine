@@ -34,13 +34,35 @@ class ContentHandler:
                 raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
             article = json.loads(raw)
-            log.info("content.article_generated  task=%s  keyword=%s", task_id, keyword)
+
+            # Ensure content_html is present — it is the required field for publish_content
+            if "content_html" not in article:
+                # Fallback: if Claude returned 'content' instead, remap it
+                if "content" in article:
+                    article["content_html"] = article.pop("content")
+                else:
+                    log.error("content.missing_content_html  task=%s  keys=%s",
+                              task_id, list(article.keys()))
+                    return ExecResult(
+                        task_id=task_id,
+                        status=ExecStatus.FAILED,
+                        output={"error": "Claude response missing content_html field",
+                                "received_keys": list(article.keys())},
+                    )
+
+            log.info("content.article_generated  task=%s  keyword=%s  words=%s",
+                     task_id, keyword, article.get("word_count", "?"))
 
             return ExecResult(
                 task_id=task_id,
                 status=ExecStatus.SUCCESS,
                 output={"type": "article", "keyword": keyword, "ready_to_apply": True, **article},
             )
+        except json.JSONDecodeError as e:
+            log.error("content.json_parse_fail  task=%s  err=%s  raw_preview=%s",
+                      task_id, e, raw[:200] if "raw" in dir() else "N/A")
+            return ExecResult(task_id=task_id, status=ExecStatus.FAILED,
+                              output={"error": f"JSON parse failed: {e}"})
         except Exception as e:
             log.error("content.article_fail  task=%s  err=%s", task_id, e)
             return ExecResult(task_id=task_id, status=ExecStatus.FAILED, output={"error": str(e)})

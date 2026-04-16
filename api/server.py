@@ -46,6 +46,11 @@ async def lifespan(app: FastAPI):
     executor = ExecutionRouter(db)
     learner = LearningEngine(db)
     patterns = PatternMemory(db)
+
+    # Register publishing connectors — must happen before any task publishes
+    from execution.startup import init_publisher
+    init_publisher()
+
     log.info("SEO Engine v5 initialized  model=%s", brain.model)
     yield
 
@@ -1439,7 +1444,7 @@ async def ai_sitemap(urls: list[dict]):
 async def queue_status():
     """Get Celery queue stats — pending tasks, active workers, results."""
     try:
-        from queue.celery_app import app as celery_app
+        from taskq.celery_app import app as celery_app
         inspect = celery_app.control.inspect(timeout=3)
         active = inspect.active() or {}
         reserved = inspect.reserved() or {}
@@ -1465,21 +1470,21 @@ class QueueTaskRequest(BaseModel):
 async def queue_task(req: QueueTaskRequest):
     """Submit a business analysis task to the Celery queue (non-blocking)."""
     try:
-        from queue.tasks import analyze_business, orchestrate_business
+        from taskq.tasks import analyze_business, orchestrate_business
         if req.mode == "orchestrate":
             task = orchestrate_business.delay(req.business_id, req.business_data)
         else:
             task = analyze_business.delay(req.business_id, req.business_data)
         return {"task_id": task.id, "status": "queued", "mode": req.mode}
     except Exception as e:
-        return {"error": str(e), "note": "Celery worker not running. Start with: celery -A queue.celery_app worker"}
+        return {"error": str(e), "note": "Celery worker not running. Start with: celery -A taskq.celery_app worker"}
 
 
 @app.get("/queue/result/{task_id}")
 async def queue_result(task_id: str):
     """Get the result of a queued task."""
     try:
-        from queue.celery_app import app as celery_app
+        from taskq.celery_app import app as celery_app
         result = celery_app.AsyncResult(task_id)
         return {
             "task_id": task_id,
@@ -1544,6 +1549,122 @@ async def cwv_analysis(req: CWVRequest):
         "ttfb_ms": result.ttfb_ms,
         "quick_wins": analyzer.get_quick_wins(result),
         "opportunities": result.opportunities,
+    }
+
+
+# ── Content Pipeline ──────────────────────────────────────────────────────────
+
+class PipelineRunRequest(BaseModel):
+    business: BusinessContext
+    keyword: str
+    page_type: str = "service_page"   # service_page | blog_post | location_page
+    async_run: bool = True             # True = queue in Celery; False = run inline
+
+
+class PipelineStatusRequest(BaseModel):
+    task_id: str
+
+
+@app.post("/pipeline/run")
+async def pipeline_run(req: PipelineRunRequest):
+    """Trigger the full content pipeline: generate → publish → link inject → index → track.
+
+    With async_run=True (default) the pipeline is queued in Celery and returns immediately.
+    With async_run=False the generate step runs inline (slower, for testing).
+    """
+    business_data = req.business.model_dump()
+
+    if req.async_run:
+        from taskq.tasks import run_content_pipeline
+        task = run_content_pipeline.apply_async(
+            args=[business_data, req.keyword, req.page_type],
+        )
+        return {
+            "status": "queued",
+            "task_id": task.id,
+            "keyword": req.keyword,
+            "page_type": req.page_type,
+            "message": f"Pipeline queued. Poll /pipeline/status/{task.id} for progress.",
+        }
+    else:
+        # Inline: run generate + publish synchronously (no Celery)
+        from execution.handlers.content import ContentHandler
+        from execution.startup import get_publisher
+        from execution.publisher import ContentPackage
+
+        handler = ContentHandler()
+        result = await handler.create_article(
+            task_id="inline",
+            target=req.keyword,
+            action=f"create {req.page_type}",
+            business=req.business,
+        )
+        return {
+            "status": result.status.value,
+            "output": result.output,
+            "keyword": req.keyword,
+        }
+
+
+@app.get("/pipeline/status/{task_id}")
+async def pipeline_status(task_id: str):
+    """Poll the status of a queued pipeline task."""
+    from taskq.celery_app import app as celery_app
+    from celery.result import AsyncResult
+
+    result = AsyncResult(task_id, app=celery_app)
+    state = result.state
+    info: dict = {}
+
+    if state == "SUCCESS":
+        info = result.result or {}
+    elif state == "FAILURE":
+        info = {"error": str(result.info)}
+    elif state == "PENDING":
+        info = {"message": "Task is waiting to be picked up by a worker."}
+
+    return {"task_id": task_id, "state": state, "info": info}
+
+
+@app.post("/pipeline/run-batch")
+async def pipeline_run_batch(businesses: list[dict], keywords: list[str]):
+    """Queue a content pipeline for every business × keyword combination.
+
+    Body example:
+      businesses: [{...BusinessContext...}]
+      keywords: ["emergency plumber nyc", "drain cleaning manhattan"]
+    """
+    from taskq.tasks import run_content_pipeline
+    queued = []
+    for biz in businesses:
+        for kw in keywords:
+            task = run_content_pipeline.apply_async(args=[biz, kw, "service_page"])
+            queued.append({"task_id": task.id, "keyword": kw,
+                           "business": biz.get("business_name", "")})
+
+    return {"queued": len(queued), "tasks": queued}
+
+
+# ── Feedback loop trigger ─────────────────────────────────────────────────────
+
+@app.post("/pipeline/feedback/{business_id}")
+async def trigger_feedback_loop(business_id: str):
+    """Manually trigger the feedback + learning loop for a business."""
+    from taskq.tasks import run_feedback_loop
+    task = run_feedback_loop.apply_async(args=[business_id])
+    return {"task_id": task.id, "business_id": business_id, "status": "queued"}
+
+
+# ── Publisher health ──────────────────────────────────────────────────────────
+
+@app.get("/publisher/status")
+async def publisher_status():
+    """Show which publishing connectors are currently registered."""
+    from execution.startup import get_publisher
+    pub = get_publisher()
+    return {
+        "connectors_registered": list(pub.connectors.keys()),
+        "count": len(pub.connectors),
     }
 
 

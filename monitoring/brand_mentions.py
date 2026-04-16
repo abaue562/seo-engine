@@ -127,6 +127,64 @@ class BrandMentionMonitor:
         self.brandmentions_api_key = os.getenv("BRANDMENTIONS_API_KEY", "")
 
     # ------------------------------------------------------------------
+    # Main entry point (called by Celery task monitor_ai_citations)
+    # ------------------------------------------------------------------
+
+    async def check(self, business_name: str, business_id: str | None = None) -> list[dict]:
+        """Aggregate all mention sources for a brand and return a list of mention dicts.
+
+        This is the primary method called by the Celery task `monitor_ai_citations`.
+
+        Args:
+            business_name: Display name of the business to search for.
+            business_id:   Optional identifier for storage namespacing.
+
+        Returns:
+            List of mention dicts (serialised Mention objects).
+        """
+        # Run perplexity + web scan synchronously (they use blocking httpx.Client)
+        import asyncio
+
+        loop = asyncio.get_event_loop()
+        perplexity_mentions: list[Mention] = await loop.run_in_executor(
+            None, self.check_perplexity_citation, business_name
+        )
+        web_mentions: list[Mention] = await loop.run_in_executor(
+            None, self.scan_web_mentions, business_name
+        )
+
+        # API-based check (non-blocking if key missing)
+        api_mentions: list[Mention] = []
+        if self.brandmentions_api_key:
+            api_mentions = await loop.run_in_executor(
+                None, self.check_via_brandmentions_api, business_name
+            )
+
+        all_mentions = perplexity_mentions + web_mentions + api_mentions
+
+        # Deduplicate by URL
+        seen: set[str] = set()
+        deduped: list[Mention] = []
+        for m in all_mentions:
+            if m.url not in seen:
+                seen.add(m.url)
+                deduped.append(m)
+
+        # Persist to storage
+        brand_id = business_id or re.sub(r"[^a-z0-9]+", "-", business_name.lower()).strip("-")
+        if deduped:
+            self.save_mentions(brand_id, deduped)
+
+        log.info(
+            "brand_monitor.check_done  brand=%s  total=%d  ai=%d  web=%d  api=%d",
+            business_name, len(deduped),
+            len(perplexity_mentions), len(web_mentions), len(api_mentions),
+        )
+
+        from dataclasses import asdict
+        return [asdict(m) for m in deduped]
+
+    # ------------------------------------------------------------------
     # AI Citation Monitoring
     # ------------------------------------------------------------------
 

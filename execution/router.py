@@ -81,6 +81,10 @@ class ExecutionRouter:
             return ExecResult(task_id=task_id, status=ExecStatus.SKIPPED, output={"reason": reason}, log=exec_log)
 
         # --- Mode routing ---
+        # is_shadow is True when: shadow_mode=True on router, force_shadow=True on call,
+        # or task.execution_mode == SHADOW
+        is_shadow = is_shadow or (task.execution_mode == ExecutionMode.SHADOW)
+
         if task.execution_mode == ExecutionMode.MANUAL:
             # MANUAL: just return instructions, don't execute
             exec_log.status = ExecStatus.SUCCESS
@@ -108,7 +112,7 @@ class ExecutionRouter:
         exec_log.status = ExecStatus.EXECUTING
 
         if is_shadow:
-            # Shadow mode: generate content, log it, but mark as shadow
+            # Shadow mode: generate content, log it, but do NOT publish
             result = await self._run_handler(task, business, task_id)
             result.status = ExecStatus.SKIPPED
             exec_log.status = ExecStatus.SKIPPED
