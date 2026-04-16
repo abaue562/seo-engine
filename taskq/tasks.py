@@ -869,7 +869,21 @@ def publish_content(self, generate_result: dict, business_data: dict) -> dict:
             source="content_pipeline",
         )
 
-        publisher = get_publisher()
+        # Per-business WP credentials override global env vars
+        biz_wp_url = business_data.get("wp_site_url", "").rstrip("/")
+        biz_wp_user = business_data.get("wp_username", "")
+        biz_wp_pass = business_data.get("wp_app_password", "")
+        if biz_wp_url and biz_wp_user and biz_wp_pass:
+            from execution.publisher import MultiChannelPublisher
+            from execution.connectors.wordpress import WordPressConnector
+            publisher = MultiChannelPublisher()
+            publisher.register("wordpress", WordPressConnector(biz_wp_url, biz_wp_user, biz_wp_pass))
+            # honour per-business publish status if set
+            biz_pub_status = business_data.get("wp_publish_status", os.getenv("WP_PUBLISH_STATUS", "publish"))
+            package.assets["blog"]["status"] = biz_pub_status
+            log.info("publish_content.using_biz_wp  site=%s  user=%s", biz_wp_url, biz_wp_user)
+        else:
+            publisher = get_publisher()
         report = _run_async(publisher.publish_package(package))
 
         # Extract WordPress result

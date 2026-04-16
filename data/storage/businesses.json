@@ -58,6 +58,10 @@
     "avg_job_value": 0.0,
     "reviews_count": 0,
     "monthly_traffic": 0,
-    "status": "active"
+    "status": "active",
+    "wp_site_url": "https://homelights9.wordpress.com",
+    "wp_username": "abaue562",
+    "wp_app_password": "Seotest!23",
+    "wp_publish_status": "publish"
   }
 ]
