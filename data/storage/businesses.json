@@ -25,5 +25,39 @@
     "owner_email": "aion@gethubed.com",
     "contact_name": "Admin",
     "status": "active"
+  },
+  {
+    "business_id": "75354f9d-e9c4-4c9f-b5ad-900f48ba2988",
+    "name": "Blend Bright Lights",
+    "domain": "blendbrightlights.com",
+    "website": "https://blendbrightlights.com",
+    "primary_service": "permanent LED lighting installation",
+    "secondary_services": [],
+    "primary_city": "Kelowna",
+    "state": "BC",
+    "service_areas": [
+      "Kelowna",
+      "Okanagan",
+      "West Kelowna",
+      "Vernon",
+      "Penticton"
+    ],
+    "primary_keywords": [
+      "permanent LED lighting",
+      "roofline lighting",
+      "programmable LED lights",
+      "outdoor LED lighting Okanagan",
+      "landscape lighting Kelowna"
+    ],
+    "competitors": [],
+    "owner_email": "",
+    "contact_name": "",
+    "target_customer": "",
+    "gbp_url": "",
+    "years_active": 0,
+    "avg_job_value": 0.0,
+    "reviews_count": 0,
+    "monthly_traffic": 0,
+    "status": "active"
   }
 ]

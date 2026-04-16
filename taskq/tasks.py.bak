@@ -1825,41 +1825,17 @@ def auto_content_briefs(self) -> dict:
         briefs_path = Path("data/storage/content_briefs")
         briefs_path.mkdir(parents=True, exist_ok=True)
 
-        # Build candidates: business primary_keywords first, then Twitter Intel seeds
         candidates = []
-        biz_keyword_map = {}  # maps keyword -> (biz_domain, biz)
-
-        # 1. Pull from all registered businesses' primary keywords
-        biz_file = Path("data/storage/businesses.json")
-        businesses = []
-        if biz_file.exists():
-            businesses = json.loads(biz_file.read_text())
-            for biz in businesses:
-                keywords = biz.get("primary_keywords", [])
-                service = biz.get("primary_service", "")
-                city = biz.get("primary_city", "")
-                biz_domain = biz.get("domain", "default").replace(".", "_")
-
-                for kw in keywords[:5]:  # max 5 per business
-                    if kw and kw not in candidates:
-                        candidates.append(kw)
-                        biz_keyword_map[kw] = (biz_domain, biz)
-
-                # Also add city+service combo
-                if service and city:
-                    combo = f"{service} {city}"
-                    if combo not in candidates:
-                        candidates.append(combo)
-                        biz_keyword_map[combo] = (biz_domain, biz)
-
-        # 2. Supplement with Twitter Intel seeds (only if not enough keywords)
         seeds_file = Path("data/storage/keyword_seeds/twitter_intel_seeds.json")
-        if seeds_file.exists() and len(candidates) < 10:
+        if seeds_file.exists():
             data = json.loads(seeds_file.read_text())
             for s in data.get("seeds", [])[:5]:
                 kw = s.get("keyword", "")
-                if kw and kw not in candidates:
+                if kw:
                     candidates.append(kw)
+            for t in data.get("trending", [])[:3]:
+                if t and t not in candidates:
+                    candidates.append(t)
 
         if not candidates:
             candidates = [
@@ -1870,12 +1846,7 @@ def auto_content_briefs(self) -> dict:
 
         generated = []
         for keyword in candidates[:3]:
-            # Prefix filename with business domain if known
-            if keyword in biz_keyword_map:
-                biz_domain, _ = biz_keyword_map[keyword]
-                safe_name = f"{biz_domain}_{keyword[:40]}".replace(" ", "_").replace("/", "_")
-            else:
-                safe_name = keyword[:40].replace(" ", "_").replace("/", "_")
+            safe_name = keyword[:40].replace(" ", "_").replace("/", "_")
             brief_file = briefs_path / f"{safe_name}.json"
             if brief_file.exists():
                 log.info("auto_content_briefs.skip_existing  keyword=%s", keyword)
@@ -1898,10 +1869,6 @@ def auto_content_briefs(self) -> dict:
 
             brief_dict = scraper.brief_to_dict(brief)
             brief_dict["generated_at"] = _utc_now()
-            if keyword in biz_keyword_map:
-                _, biz = biz_keyword_map[keyword]
-                brief_dict["business_id"] = biz.get("business_id", "")
-                brief_dict["business_domain"] = biz.get("domain", "")
             brief_file.write_text(json.dumps(brief_dict, indent=2))
 
             summary = (
