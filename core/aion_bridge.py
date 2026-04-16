@@ -281,9 +281,8 @@ class AIONBridge:
     ) -> dict:
         """Add a node to the knowledge graph (keyword, topic, competitor, entity)."""
         return _post(_KNOWLEDGE_URL, "/nodes", {
-            "name": label,       # AION Knowledge API uses 'name' not 'label'
-            "label": label,
-            "type": node_type,
+            "name": label,       # AION Knowledge API uses 'name' + 'node_type'
+            "node_type": node_type,
             "properties": properties or {},
         })
 

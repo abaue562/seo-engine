@@ -151,7 +151,7 @@ class CompetitorScraper:
         if include_youtube:
             videos = aion.youtube_search(keyword, max_results=3)
             for v in videos:
-                snippet = f"[{v['views']:,} views] {v['title']} by {v['channel']}"
+                snippet = f"[{v.get('views', 0):,} views] {v.get('title', '')} by {v.get('channel', '')}"
                 yt_snippets.append(snippet)
                 brief.youtube_insights.append(snippet)
 

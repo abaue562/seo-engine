@@ -641,7 +641,7 @@ class SEODatabase:
         """Return all registered businesses."""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT business_id, name, config_json FROM businesses ORDER BY created_at DESC"
+                "SELECT id as business_id, name, config_json FROM businesses ORDER BY created_at DESC"
             ).fetchall()
         import json
         result = []

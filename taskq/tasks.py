@@ -801,8 +801,37 @@ def publish_content(self, generate_result: dict, business_data: dict) -> dict:
             content_html += "\n" + faq_html
 
         schema = page.get("schema_json", {})
+        # Always inject Article + FAQ JSON-LD schema
+        _site_url = os.getenv("SITE_URL", os.getenv("SITE_BASE_URL", "https://gethubed.com"))
+        _slug = page.get("slug", keyword.lower().replace(" ", "-"))
+        _biz_name = business_data.get("business_name", "")
         if schema:
-            content_html += f'\n<script type="application/ld+json">{json.dumps(schema)}</script>'
+            content_html += chr(10) + chr(60) + chr(115) + "cript type=" + chr(34) + "application/ld+json" + chr(34) + chr(62) + json.dumps(schema) + chr(60) + chr(47) + "script" + chr(62)
+        else:
+            _article_ld = {
+                "@context": "https://schema.org",
+                "@type": "Article",
+                "headline": page.get("title", keyword),
+                "description": page.get("meta_description", ""),
+                "url": _site_url.rstrip("/") + "/" + _slug + "/",
+                "datePublished": _utc_now(),
+                "dateModified": _utc_now(),
+                "author": {"@type": "Organization", "name": _biz_name},
+                "publisher": {"@type": "Organization", "name": _biz_name},
+                "mainEntityOfPage": {"@type": "WebPage", "@id": _site_url.rstrip("/") + "/" + _slug + "/"}
+            }
+            _ld_open = chr(60) + "script type=" + chr(34) + "application/ld+json" + chr(34) + chr(62)
+            _ld_close = chr(60) + chr(47) + "script" + chr(62)
+            content_html += chr(10) + _ld_open + json.dumps(_article_ld) + _ld_close
+            if faq_items:
+                _faq_ld = {
+                    "@context": "https://schema.org",
+                    "@type": "FAQPage",
+                    "mainEntity": [{"@type": "Question", "name": q.get("question", ""),
+                                     "acceptedAnswer": {"@type": "Answer", "text": q.get("answer", "")}}
+                                    for q in faq_items]
+                }
+                content_html += chr(10) + _ld_open + json.dumps(_faq_ld) + _ld_close
 
         package = ContentPackage(
             topic=page.get("title", keyword),
