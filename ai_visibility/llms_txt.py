@@ -302,3 +302,333 @@ def audit_site_crawlers(url: str) -> dict:
         }
     except Exception as e:
         return {"error": str(e)}
+
+
+# =====================================================================
+# New AI Crawler Setup Helpers
+# =====================================================================
+
+def generate_robots_txt_additions(site_url: str = "") -> str:
+    """Return the lines to add to robots.txt to explicitly allow AI crawlers.
+
+    These directives tell all major AI search crawlers they are welcome
+    to index the site for inclusion in AI-generated responses.
+    """
+    lines = [
+        "# Allow AI search crawlers",
+        "User-agent: GPTBot",
+        "Allow: /",
+        "",
+        "User-agent: ClaudeBot",
+        "Allow: /",
+        "",
+        "User-agent: PerplexityBot",
+        "Allow: /",
+        "",
+        "User-agent: Bingbot",
+        "Allow: /",
+        "",
+        "User-agent: anthropic-ai",
+        "Allow: /",
+        "",
+        "User-agent: OAI-SearchBot",
+        "Allow: /",
+        "",
+        "User-agent: ChatGPT-User",
+        "Allow: /",
+        "",
+        "User-agent: Google-Extended",
+        "Allow: /",
+        "",
+        "User-agent: FacebookBot",
+        "Allow: /",
+    ]
+    if site_url:
+        parsed = urlparse(site_url)
+        base = f"{parsed.scheme}://{parsed.netloc}"
+        lines += [
+            "",
+            "# llms.txt for AI understanding",
+            f"# {base}/llms.txt",
+        ]
+    return "\n".join(lines)
+
+
+def validate_ai_crawler_access(site_url: str) -> dict:
+    """Fetch robots.txt from site_url and check whether each AI crawler is allowed or blocked.
+
+    Returns {gptbot: 'allowed'|'blocked'|'unknown', claudebot: ..., perplexitybot: ..., bingbot: ...}
+    along with a full per-crawler status dict.
+    """
+    import requests as _req
+
+    parsed = urlparse(site_url)
+    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt"
+
+    try:
+        resp = _req.get(robots_url, timeout=10, headers={"User-Agent": "SEOEngine/1.0"})
+    except Exception as e:
+        log.warning("validate_ai_crawlers.fetch_error  url=%s  err=%s", robots_url, e)
+        return {
+            "error": str(e),
+            "gptbot": "unknown",
+            "claudebot": "unknown",
+            "perplexitybot": "unknown",
+            "bingbot": "unknown",
+            "anthropic_ai": "unknown",
+        }
+
+    if resp.status_code != 200:
+        # No robots.txt = everything allowed by default
+        return {
+            "note": f"No robots.txt found (HTTP {resp.status_code}) — all crawlers allowed by default",
+            "gptbot": "allowed",
+            "claudebot": "allowed",
+            "perplexitybot": "allowed",
+            "bingbot": "allowed",
+            "anthropic_ai": "allowed",
+        }
+
+    robots_text = resp.text
+    audit = audit_crawler_access(robots_text)
+    crawlers = audit.get("crawlers", {})
+
+    def _status(name: str) -> str:
+        info = crawlers.get(name)
+        if info is None:
+            # Not mentioned explicitly — blanket block check
+            if "Disallow: /" in robots_text and "User-agent: *" in robots_text:
+                return "blocked"
+            return "allowed"
+        return info.get("status", "unknown")
+
+    return {
+        "robots_txt_url": robots_url,
+        "gptbot": _status("GPTBot"),
+        "claudebot": _status("ClaudeBot"),
+        "perplexitybot": _status("PerplexityBot"),
+        "bingbot": _status("Bingbot"),
+        "anthropic_ai": _status("anthropic-ai"),
+        "oai_searchbot": _status("OAI-SearchBot"),
+        "google_extended": _status("Google-Extended"),
+        "full_audit": audit,
+    }
+
+
+def generate_sitemap_ai_xml(urls: list) -> str:
+    """Generate a dedicated sitemap-ai.xml for AI-important pages.
+
+    Each url entry dict may contain:
+        loc           (required)
+        lastmod       (defaults to today)
+        changefreq    (defaults to 'monthly')
+        priority      (0.0–1.0, defaults to 0.8)
+        ai_priority   ('high' | 'medium' | 'low', defaults to 'medium')
+        ai_content_type  (e.g. 'informational', 'service', 'faq')
+
+    The sitemap includes a custom <ai:priority> extension tag.
+    """
+    from datetime import date as _date
+
+    today = _date.today().isoformat()
+
+    lines = [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"',
+        '        xmlns:ai="https://schema.org/ai-sitemap/1.0"',
+        '        xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"',
+        '        xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9',
+        '          http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd">',
+        "  <!-- AI-priority sitemap: pages optimised for AI search citation -->",
+    ]
+
+    for entry in urls:
+        loc = entry.get("loc", "")
+        if not loc:
+            continue
+
+        lastmod = entry.get("lastmod", today)
+        changefreq = entry.get("changefreq", "monthly")
+        ai_priority = entry.get("ai_priority", "medium")
+        ai_content_type = entry.get("ai_content_type", "informational")
+
+        try:
+            priority = max(0.0, min(1.0, float(entry.get("priority", 0.8))))
+        except (TypeError, ValueError):
+            priority = 0.8
+
+        lines += [
+            "  <url>",
+            f"    <loc>{loc}</loc>",
+            f"    <lastmod>{lastmod}</lastmod>",
+            f"    <changefreq>{changefreq}</changefreq>",
+            f"    <priority>{priority:.1f}</priority>",
+            f"    <ai:priority>{ai_priority}</ai:priority>",
+            f"    <ai:contentType>{ai_content_type}</ai:contentType>",
+            "  </url>",
+        ]
+
+    lines.append("</urlset>")
+    return "\n".join(lines)
+
+
+def get_full_setup_checklist(site_url: str) -> dict:
+    """Return a checklist of all AI search readiness items with pass/fail status.
+
+    Checks: llms.txt, robots.txt AI access, sitemap, sitemap-ai.xml,
+    schema markup, HTTPS, canonical tags, Open Graph, author markup.
+    """
+    import requests as _req
+    import datetime as _dt
+
+    parsed = urlparse(site_url)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+
+    def _fetch(path: str, timeout: int = 8):
+        try:
+            return _req.get(
+                f"{base}{path}", timeout=timeout,
+                headers={"User-Agent": "SEOEngine/1.0"},
+                allow_redirects=True,
+            )
+        except Exception:
+            return None
+
+    # Fetch key resources
+    robots_resp = _fetch("/robots.txt")
+    llms_resp = _fetch("/llms.txt")
+    llms_full_resp = _fetch("/llms-full.txt")
+    sitemap_resp = _fetch("/sitemap.xml")
+    sitemap_ai_resp = _fetch("/sitemap-ai.xml")
+    homepage_resp = _fetch("/")
+
+    homepage_text = (
+        homepage_resp.text if homepage_resp and homepage_resp.status_code == 200 else ""
+    )
+
+    # AI crawler access
+    crawler_status = validate_ai_crawler_access(site_url)
+    key_crawlers = ("gptbot", "claudebot", "perplexitybot", "bingbot", "anthropic_ai")
+    all_allowed = all(crawler_status.get(k, "unknown") == "allowed" for k in key_crawlers)
+
+    # Schema markup
+    has_schema = "application/ld+json" in homepage_text or "schema.org" in homepage_text
+    has_local_biz_schema = (
+        '"LocalBusiness"' in homepage_text or '"Service"' in homepage_text
+    )
+
+    # Other signals
+    has_https = base.startswith("https://")
+    has_canonical = 'rel="canonical"' in homepage_text or "rel='canonical'" in homepage_text
+    has_og = 'property="og:' in homepage_text or "property='og:" in homepage_text
+    has_author = "author" in homepage_text.lower() and "Person" in homepage_text
+
+    def _ok(resp) -> bool:
+        return resp is not None and resp.status_code == 200
+
+    checklist = {
+        "site_url": site_url,
+        "checked_at": _dt.datetime.utcnow().isoformat(),
+        "items": {
+            "llms_txt": {
+                "label": "llms.txt file present",
+                "status": "pass" if _ok(llms_resp) else "fail",
+                "url": f"{base}/llms.txt",
+                "importance": "critical",
+            },
+            "llms_full_txt": {
+                "label": "llms-full.txt file present",
+                "status": "pass" if _ok(llms_full_resp) else "fail",
+                "url": f"{base}/llms-full.txt",
+                "importance": "recommended",
+            },
+            "robots_txt_exists": {
+                "label": "robots.txt accessible",
+                "status": "pass" if _ok(robots_resp) else "fail",
+                "url": f"{base}/robots.txt",
+                "importance": "critical",
+            },
+            "ai_crawlers_allowed": {
+                "label": "All major AI crawlers explicitly allowed in robots.txt",
+                "status": "pass" if all_allowed else "warn",
+                "detail": {k: crawler_status.get(k, "unknown") for k in key_crawlers},
+                "importance": "critical",
+            },
+            "sitemap_xml": {
+                "label": "sitemap.xml present",
+                "status": "pass" if _ok(sitemap_resp) else "fail",
+                "url": f"{base}/sitemap.xml",
+                "importance": "critical",
+            },
+            "sitemap_ai_xml": {
+                "label": "sitemap-ai.xml present (AI-focused sitemap)",
+                "status": "pass" if _ok(sitemap_ai_resp) else "fail",
+                "url": f"{base}/sitemap-ai.xml",
+                "importance": "recommended",
+            },
+            "https": {
+                "label": "Site uses HTTPS",
+                "status": "pass" if has_https else "fail",
+                "importance": "critical",
+            },
+            "schema_markup": {
+                "label": "JSON-LD schema markup on homepage",
+                "status": "pass" if has_schema else "fail",
+                "importance": "critical",
+            },
+            "local_business_schema": {
+                "label": "LocalBusiness or Service schema present",
+                "status": "pass" if has_local_biz_schema else "fail",
+                "importance": "high",
+            },
+            "canonical_tags": {
+                "label": "Canonical tags present",
+                "status": "pass" if has_canonical else "warn",
+                "importance": "recommended",
+            },
+            "open_graph": {
+                "label": "Open Graph meta tags present",
+                "status": "pass" if has_og else "warn",
+                "importance": "recommended",
+            },
+            "author_markup": {
+                "label": "Author / Person schema on content pages",
+                "status": "pass" if has_author else "fail",
+                "importance": "high",
+            },
+        },
+    }
+
+    # Compute summary
+    items = list(checklist["items"].values())
+    passed = sum(1 for i in items if i["status"] == "pass")
+    failed = sum(1 for i in items if i["status"] == "fail")
+    warned = sum(1 for i in items if i["status"] == "warn")
+    total = len(items)
+
+    score = int((passed / total) * 100)
+    if score >= 90:
+        grade = "A"
+    elif score >= 75:
+        grade = "B"
+    elif score >= 60:
+        grade = "C"
+    elif score >= 40:
+        grade = "D"
+    else:
+        grade = "F"
+
+    checklist["summary"] = {
+        "passed": passed,
+        "failed": failed,
+        "warned": warned,
+        "total": total,
+        "score": score,
+        "grade": grade,
+    }
+
+    log.info(
+        "llms_txt.checklist  url=%s  score=%d  grade=%s  passed=%d/%d",
+        site_url, score, grade, passed, total,
+    )
+    return checklist
