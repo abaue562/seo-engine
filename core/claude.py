@@ -302,22 +302,25 @@ def _call_cli(prompt: str, system: str, model: str | None) -> str:
 
 
 def _build_cmd(prompt: str, system: str, model: str | None) -> list[str]:
-    """Build the claude CLI command list."""
-    # Normalise model name — CLI accepts "sonnet", "opus", "haiku" or full IDs
+    """Build the claude CLI command list.
+
+    Claude Code v2+ uses:
+        claude -p "prompt" --model sonnet [--system-prompt "..."]
+    The prompt is a positional argument, NOT --message.
+    """
     model_arg = _normalise_model(model)
 
     cmd = [
         _CLI_PATH,
-        "--print",                   # non-interactive, print response and exit
-        "--model",   model_arg,
-        "--max-turns", "1",          # single turn for pipeline tasks
+        "-p",                        # --print: non-interactive output mode
+        "--model", model_arg,
     ]
 
     if system:
         cmd.extend(["--system-prompt", system])
 
-    # Prompt is passed via stdin (avoids shell-quoting issues with long prompts)
-    cmd.extend(["--message", prompt])
+    # Prompt is the positional argument (last)
+    cmd.append(prompt)
 
     return cmd
 

@@ -100,8 +100,7 @@ class SystemHealthMonitor:
         """Verify Claude CLI is installed and authenticated."""
         try:
             proc = await asyncio.create_subprocess_exec(
-                "claude", "--print", "--model", "haiku", "--max-turns", "1",
-                "--message", "Reply with: OK",
+                "claude", "-p", "--model", "haiku", "Reply with: OK",
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
