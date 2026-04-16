@@ -653,6 +653,64 @@ class SEODatabase:
             result.append({"business_id": r["business_id"], "name": r["name"], **config})
         return result
 
+
+    def add_business(self, business_id, name, domain, config):
+        """Register a new business in SQLite and sync to businesses.json."""
+        import json as _json
+        import uuid as _uuid
+        from datetime import datetime, timezone
+        from pathlib import Path
+
+        bid = business_id or str(_uuid.uuid4())
+        config_str = _json.dumps(config)
+
+        with self._lock:
+            self._conn.execute(
+                """INSERT OR REPLACE INTO businesses (id, name, domain, config_json, updated_at)
+                   VALUES (?, ?, ?, ?, ?)""",
+                (bid, name, domain, config_str, datetime.now(tz=timezone.utc).isoformat())
+            )
+            self._conn.commit()
+
+        # Sync to businesses.json (what tasks actually read)
+        biz_file = Path("data/storage/businesses.json")
+        biz_file.parent.mkdir(parents=True, exist_ok=True)
+
+        businesses = []
+        if biz_file.exists():
+            try:
+                businesses = _json.loads(biz_file.read_text())
+            except Exception:
+                businesses = []
+
+        # Remove existing entry for this domain/id
+        businesses = [b for b in businesses if b.get("domain") != domain and b.get("business_id") != bid]
+
+        # Add new entry
+        entry = {"business_id": bid, "name": name, "domain": domain}
+        entry.update(config)
+        businesses.append(entry)
+        biz_file.write_text(_json.dumps(businesses, indent=2))
+
+    def remove_business(self, business_id):
+        """Remove a business from SQLite and businesses.json."""
+        import json as _json
+        from pathlib import Path
+
+        with self._lock:
+            self._conn.execute("DELETE FROM businesses WHERE id = ?", (business_id,))
+            self._conn.commit()
+
+        biz_file = Path("data/storage/businesses.json")
+        if biz_file.exists():
+            businesses = _json.loads(biz_file.read_text())
+            orig_len = len(businesses)
+            businesses = [b for b in businesses if b.get("business_id") != business_id]
+            if len(businesses) < orig_len:
+                biz_file.write_text(_json.dumps(businesses, indent=2))
+                return True
+        return False
+
     def close(self):
         self._conn.close()
 

@@ -1954,6 +1954,140 @@ async def youtube_research(req: YouTubeResearchRequest):
     return {"topic": req.topic, "count": len(results), "videos": results}
 
 
+
+# ── Business Onboarding ──────────────────────────────────────────────────────
+
+class BusinessRegisterRequest(BaseModel):
+    name: str
+    website: str
+    domain: str = ""
+    primary_service: str = ""
+    secondary_services: list = []
+    primary_city: str = ""
+    state: str = ""
+    service_areas: list = []
+    primary_keywords: list = []
+    competitors: list = []
+    owner_email: str = ""
+    contact_name: str = ""
+    target_customer: str = ""
+    gbp_url: str = ""
+    years_active: int = 0
+    avg_job_value: float = 0.0
+    reviews_count: int = 0
+    monthly_traffic: int = 0
+
+
+@app.post("/businesses")
+async def register_business(req: BusinessRegisterRequest):
+    """Register a new business for automated SEO. Immediately starts task pipeline."""
+    import uuid
+    from data.db import get_db
+
+    domain = req.domain or req.website.replace("https://", "").replace("http://", "").rstrip("/")
+    business_id = str(uuid.uuid4())
+
+    config = {
+        "website": req.website,
+        "domain": domain,
+        "primary_service": req.primary_service,
+        "secondary_services": req.secondary_services,
+        "primary_city": req.primary_city,
+        "state": req.state,
+        "service_areas": req.service_areas,
+        "primary_keywords": req.primary_keywords,
+        "competitors": req.competitors,
+        "owner_email": req.owner_email,
+        "contact_name": req.contact_name,
+        "target_customer": req.target_customer,
+        "gbp_url": req.gbp_url,
+        "years_active": req.years_active,
+        "avg_job_value": req.avg_job_value,
+        "reviews_count": req.reviews_count,
+        "monthly_traffic": req.monthly_traffic,
+        "status": "active",
+    }
+
+    _db = get_db()
+    _db.add_business(business_id=business_id, name=req.name, domain=domain, config=config)
+
+    # Kick off initial analysis immediately
+    try:
+        from taskq.tasks import analyze_business
+        analyze_business.delay(business_id, {"name": req.name, **config})
+    except Exception:
+        pass
+
+    return {
+        "business_id": business_id,
+        "name": req.name,
+        "domain": domain,
+        "status": "registered",
+        "message": "Business registered. Initial analysis queued.",
+    }
+
+
+@app.get("/businesses")
+async def list_businesses():
+    """List all registered businesses."""
+    from data.db import get_db
+    return {"businesses": get_db().get_businesses()}
+
+
+@app.delete("/businesses/{business_id}")
+async def delete_business(business_id: str):
+    """Remove a business from the SEO engine."""
+    from data.db import get_db
+    removed = get_db().remove_business(business_id)
+    if removed:
+        return {"status": "removed", "business_id": business_id}
+    return {"status": "not_found", "business_id": business_id}
+
+
+@app.get("/businesses/{business_id}/status")
+async def business_status(business_id: str):
+    """Get task + ranking status for a specific business."""
+    import json as _json
+    import sqlite3
+    conn = sqlite3.connect("data/seo_engine.db")
+    conn.row_factory = sqlite3.Row
+
+    biz = conn.execute("SELECT * FROM businesses WHERE id = ?", (business_id,)).fetchone()
+    if not biz:
+        conn.close()
+        return {"error": "not found"}
+
+    config = _json.loads(biz["config_json"] or "{}")
+    domain = biz["domain"] or config.get("domain", "")
+
+    try:
+        rankings = conn.execute(
+            "SELECT keyword, position, checked_at FROM ranking_history WHERE domain = ? ORDER BY checked_at DESC LIMIT 20",
+            (domain,)
+        ).fetchall()
+    except Exception:
+        rankings = []
+
+    try:
+        published = conn.execute(
+            "SELECT url, published_at FROM published_urls WHERE domain = ? ORDER BY published_at DESC LIMIT 10",
+            (domain,)
+        ).fetchall() if domain else []
+    except Exception:
+        published = []
+
+    conn.close()
+
+    return {
+        "business_id": business_id,
+        "name": biz["name"],
+        "domain": domain,
+        "config": config,
+        "rankings": [dict(r) for r in rankings],
+        "published_urls": [dict(p) for p in published],
+    }
+
+
 # ---- Run ----
 
 if __name__ == "__main__":

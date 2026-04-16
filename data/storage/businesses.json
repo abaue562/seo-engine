@@ -1,0 +1,29 @@
+[
+  {
+    "business_id": "671a7aa1-3da3-464e-ab84-5caabc8aae5b",
+    "name": "GetHubed",
+    "domain": "gethubed.com",
+    "website": "https://gethubed.com",
+    "primary_service": "SEO Services",
+    "secondary_services": [
+      "Content Marketing",
+      "Link Building"
+    ],
+    "primary_city": "Austin",
+    "state": "TX",
+    "service_areas": [
+      "Austin",
+      "Texas"
+    ],
+    "primary_keywords": [
+      "SEO services Austin",
+      "content marketing Austin",
+      "link building",
+      "digital marketing"
+    ],
+    "competitors": [],
+    "owner_email": "aion@gethubed.com",
+    "contact_name": "Admin",
+    "status": "active"
+  }
+]
