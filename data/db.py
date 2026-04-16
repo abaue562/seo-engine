@@ -615,6 +615,44 @@ class SEODatabase:
             stats[tt]["success_rate"] = round(stats[tt].get("success", 0) / total, 3)
         return stats
 
+    def get_pending_indexing(self, limit: int = 20) -> list[dict]:
+        """Return URLs in the indexing queue that are due for submission."""
+        now = datetime.now(tz=timezone.utc).isoformat()
+        with self._lock:
+            rows = self._conn.execute(
+                """SELECT url, business_id, submitted_at, retry_count
+                   FROM indexing_queue
+                   WHERE indexed=0 AND (check_after IS NULL OR check_after <= ?)
+                   ORDER BY submitted_at ASC LIMIT ?""",
+                (now, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_indexed(self, url: str) -> None:
+        """Mark a URL as successfully indexed."""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE indexing_queue SET indexed=1 WHERE url=?",
+                (url,),
+            )
+            self._conn.commit()
+
+    def get_businesses(self) -> list[dict]:
+        """Return all registered businesses."""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT business_id, name, config_json FROM businesses ORDER BY created_at DESC"
+            ).fetchall()
+        import json
+        result = []
+        for r in rows:
+            try:
+                config = json.loads(r["config_json"] or "{}")
+            except Exception:
+                config = {}
+            result.append({"business_id": r["business_id"], "name": r["name"], **config})
+        return result
+
     def close(self):
         self._conn.close()
 
