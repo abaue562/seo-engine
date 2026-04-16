@@ -1,6 +1,26 @@
 version: "3.8"
 
 services:
+
+  # ── Redis (message broker + result backend) ───────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: seo-redis
+    command: redis-server --maxmemory 512mb --maxmemory-policy allkeys-lru
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - aion-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  # ── FastAPI (main API server) ─────────────────────────────────────────────
   seo-api:
     build: .
     container_name: seo-engine-api
@@ -8,17 +28,61 @@ services:
       - "8900"
     env_file:
       - config/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
     volumes:
-      - ./data/storage/local_db:/app/data/storage/local_db
+      - ./data/storage:/app/data/storage
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - aion-net
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8901/health')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8900/health')"]
       interval: 30s
       timeout: 5s
       retries: 3
 
+  # ── Celery worker (background task execution) ─────────────────────────────
+  seo-worker:
+    build: .
+    container_name: seo-engine-worker
+    command: celery -A queue.celery_app worker -Q analysis,execution,learning,monitoring --loglevel=info --concurrency=4
+    env_file:
+      - config/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./data/storage:/app/data/storage
+    depends_on:
+      redis:
+        condition: service_healthy
+      seo-api:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aion-net
+
+  # ── Celery beat (periodic task scheduler) ────────────────────────────────
+  seo-beat:
+    build: .
+    container_name: seo-engine-beat
+    command: celery -A queue.celery_app beat --loglevel=info --scheduler celery.beat.PersistentScheduler
+    env_file:
+      - config/.env
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./data/storage:/app/data/storage
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - aion-net
+
+  # ── Next.js UI dashboard ──────────────────────────────────────────────────
   seo-ui:
     build:
       context: ./ui
@@ -33,6 +97,9 @@ services:
     restart: unless-stopped
     networks:
       - aion-net
+
+volumes:
+  redis_data:
 
 networks:
   aion-net:

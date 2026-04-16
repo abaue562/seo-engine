@@ -1181,6 +1181,372 @@ async def create_plan(req: CognitiveRequest):
     return plan.model_dump()
 
 
+# --- Rank Tracking ---
+
+class RankCheckRequest(BaseModel):
+    domain: str
+    keywords: list[str]
+    location_code: int = 2840
+
+
+@app.post("/rank-check")
+async def rank_check(req: RankCheckRequest):
+    """Check current rankings for all keywords via DataForSEO SERP API."""
+    from data.connectors.rank_tracker import RankTracker
+    tracker = RankTracker()
+    results = tracker.check_rankings(req.domain, req.keywords, req.location_code)
+    return {"domain": req.domain, "results": results, "count": len(results)}
+
+
+@app.post("/rank-delta")
+async def rank_delta(req: RankCheckRequest):
+    """Get ranking changes over the last 7 days."""
+    from data.connectors.rank_tracker import RankTracker
+    tracker = RankTracker()
+    report = tracker.get_summary_report(req.domain, req.keywords)
+    return report
+
+
+@app.get("/rank-history/{domain}")
+async def rank_history(domain: str, keyword: str, days: int = 90):
+    """Get full rank history for a keyword."""
+    from data.connectors.rank_tracker import RankTracker
+    tracker = RankTracker()
+    history = tracker.get_rank_history(domain, keyword, days)
+    return {"domain": domain, "keyword": keyword, "history": history}
+
+
+# --- Content Decay ---
+
+class DecayRequest(BaseModel):
+    domain: str
+
+
+@app.post("/content-decay")
+async def content_decay_scan(req: DecayRequest):
+    """Scan all pages for content decay — find what's losing traffic."""
+    from data.analyzers.content_decay import ContentDecayDetector
+    detector = ContentDecayDetector()
+    report = detector.generate_decay_report(req.domain)
+    return report
+
+
+@app.get("/content-decay/queue/{domain}")
+async def decay_refresh_queue(domain: str, limit: int = 10):
+    """Get the top pages that need refreshing most urgently."""
+    from data.analyzers.content_decay import ContentDecayDetector
+    detector = ContentDecayDetector()
+    queue = detector.get_refresh_priority_queue(domain, limit)
+    return {"domain": domain, "refresh_queue": queue}
+
+
+# --- IndexNow ---
+
+class IndexNowRequest(BaseModel):
+    urls: list[str]
+    host: str = ""
+    key: str = ""
+
+
+@app.post("/indexnow")
+async def submit_indexnow(req: IndexNowRequest):
+    """Submit URLs to IndexNow for instant indexing across Google, Bing, Yandex."""
+    from execution.indexnow import IndexNow
+    indexnow = IndexNow(key=req.key or None, host=req.host or None)
+    if not indexnow.is_configured():
+        return {"error": "IndexNow not configured. Set INDEXNOW_API_KEY and SITE_HOST in config/.env"}
+    result = indexnow.submit_batch(req.urls)
+    return result
+
+
+@app.post("/indexnow/sitemap")
+async def ping_sitemap(sitemap_url: str):
+    """Ping Google and Bing about a sitemap update."""
+    from execution.indexnow import IndexNow
+    indexnow = IndexNow()
+    result = indexnow.submit_sitemap(sitemap_url)
+    return result
+
+
+# --- Content Quality ---
+
+class QualityCheckRequest(BaseModel):
+    content: str
+    title: str = ""
+
+
+@app.post("/quality/check")
+async def quality_check(req: QualityCheckRequest):
+    """Check content for AI generation and originality."""
+    from quality.originality import OriginalityChecker
+    checker = OriginalityChecker()
+    result = checker.check(req.content, req.title)
+    return result
+
+
+@app.post("/quality/schema-validate")
+async def schema_validate(req: QualityCheckRequest):
+    """Validate JSON-LD schema markup in HTML or raw JSON string."""
+    from quality.schema_validator import SchemaValidator
+    validator = SchemaValidator()
+    if req.content.strip().startswith("<"):
+        result = validator.validate_schema_types(req.content)
+    else:
+        result = validator.validate_json_ld(req.content)
+    return result
+
+
+# --- Author Entity ---
+
+class AuthorRequest(BaseModel):
+    specialty: str
+    business_name: str = ""
+
+
+@app.post("/authors/get-or-create")
+async def get_or_create_author(req: AuthorRequest):
+    """Get or create an author profile for a specialty."""
+    from core.authors.system import AuthorSystem
+    authors = AuthorSystem()
+    author = authors.get_or_create_author(req.specialty, req.business_name)
+    return {
+        "author": author.__dict__,
+        "schema": authors.get_author_schema(author),
+        "byline_html": authors.get_author_byline_html(author),
+    }
+
+
+@app.get("/authors")
+async def list_authors():
+    """List all author profiles."""
+    from core.authors.system import AuthorSystem
+    authors = AuthorSystem()
+    return [a.__dict__ for a in authors.list_all_authors()]
+
+
+@app.get("/authors/{specialty}/page")
+async def author_page_html(specialty: str):
+    """Get the HTML author page for a specialty."""
+    from core.authors.system import AuthorSystem
+    from fastapi.responses import HTMLResponse
+    authors = AuthorSystem()
+    author = authors.load_author(specialty)
+    if not author:
+        return {"error": f"No author found for specialty: {specialty}"}
+    return HTMLResponse(content=authors.render_author_page(author))
+
+
+# --- Entity sameAs Registry ---
+
+class SameAsRequest(BaseModel):
+    business_id: str
+    platform: str
+    url: str
+
+
+@app.post("/entity/same-as/add")
+async def add_same_as(req: SameAsRequest):
+    """Add an external entity URL (GBP, Yelp, BBB, LinkedIn, etc.) to the sameAs registry."""
+    from core.entity.same_as import SameAsRegistry
+    registry = SameAsRegistry()
+    success = registry.add_entity(req.business_id, req.platform, req.url)
+    return {"added": success, "business_id": req.business_id, "platform": req.platform}
+
+
+@app.get("/entity/same-as/{business_id}")
+async def get_same_as(business_id: str):
+    """Get all sameAs URLs and entity strength score for a business."""
+    from core.entity.same_as import SameAsRegistry
+    registry = SameAsRegistry()
+    urls = registry.get_same_as_urls(business_id)
+    score = registry.get_entity_strength_score(business_id)
+    return {"business_id": business_id, "same_as_urls": urls, "strength": score}
+
+
+class AutoDiscoverRequest(BaseModel):
+    business_id: str
+    business_name: str
+    location: str = ""
+
+
+@app.post("/entity/same-as/discover")
+async def discover_same_as(req: AutoDiscoverRequest):
+    """Auto-discover entity URLs by probing known platform patterns."""
+    from core.entity.same_as import SameAsRegistry
+    registry = SameAsRegistry()
+    result = registry.auto_discover(req.business_name, req.business_id, req.location)
+    return result
+
+
+# --- AI Citation Monitoring ---
+
+class CitationMonitorRequest(BaseModel):
+    brand: str
+    domain: str = ""
+    location: str = ""
+
+
+@app.post("/monitoring/citations")
+async def monitor_citations(req: CitationMonitorRequest):
+    """Check if brand is being cited in AI search responses and web mentions."""
+    from monitoring.brand_mentions import BrandMentionMonitor
+    monitor = BrandMentionMonitor()
+    report = monitor.generate_citation_report(req.brand, req.domain)
+    return report
+
+
+@app.post("/monitoring/perplexity")
+async def check_perplexity(req: CitationMonitorRequest):
+    """Check if brand appears in Perplexity AI search results."""
+    from monitoring.brand_mentions import BrandMentionMonitor
+    monitor = BrandMentionMonitor()
+    mentions = monitor.check_perplexity_citation(req.brand)
+    return {"brand": req.brand, "perplexity_mentions": [m.__dict__ for m in mentions]}
+
+
+# --- AI Search Setup ---
+
+class AISetupRequest(BaseModel):
+    site_url: str
+
+
+@app.post("/ai-search/setup-checklist")
+async def ai_setup_checklist(req: AISetupRequest):
+    """Full AI search readiness checklist — llms.txt, robots.txt, AI crawlers, schema."""
+    from ai_visibility.llms_txt import get_full_setup_checklist
+    return get_full_setup_checklist(req.site_url)
+
+
+@app.post("/ai-search/robots-additions")
+async def robots_additions(req: AISetupRequest):
+    """Get the robots.txt lines needed to allow AI crawlers."""
+    from ai_visibility.llms_txt import generate_robots_txt_additions
+    return {"additions": generate_robots_txt_additions(req.site_url)}
+
+
+@app.post("/ai-search/sitemap-xml")
+async def ai_sitemap(urls: list[dict]):
+    """Generate a sitemap-ai.xml for AI search engines."""
+    from ai_visibility.llms_txt import generate_sitemap_ai_xml
+    xml = generate_sitemap_ai_xml(urls)
+    from fastapi.responses import Response
+    return Response(content=xml, media_type="application/xml")
+
+
+# --- Queue Status ---
+
+@app.get("/queue/status")
+async def queue_status():
+    """Get Celery queue stats — pending tasks, active workers, results."""
+    try:
+        from queue.celery_app import app as celery_app
+        inspect = celery_app.control.inspect(timeout=3)
+        active = inspect.active() or {}
+        reserved = inspect.reserved() or {}
+        stats = inspect.stats() or {}
+        return {
+            "status": "connected",
+            "active_tasks": sum(len(v) for v in active.values()),
+            "queued_tasks": sum(len(v) for v in reserved.values()),
+            "workers": list(active.keys()),
+            "worker_count": len(active),
+        }
+    except Exception as e:
+        return {"status": "unavailable", "error": str(e), "note": "Start Redis + Celery worker to enable background tasks"}
+
+
+class QueueTaskRequest(BaseModel):
+    business_id: str
+    business_data: dict
+    mode: str = "analyze"
+
+
+@app.post("/queue/submit")
+async def queue_task(req: QueueTaskRequest):
+    """Submit a business analysis task to the Celery queue (non-blocking)."""
+    try:
+        from queue.tasks import analyze_business, orchestrate_business
+        if req.mode == "orchestrate":
+            task = orchestrate_business.delay(req.business_id, req.business_data)
+        else:
+            task = analyze_business.delay(req.business_id, req.business_data)
+        return {"task_id": task.id, "status": "queued", "mode": req.mode}
+    except Exception as e:
+        return {"error": str(e), "note": "Celery worker not running. Start with: celery -A queue.celery_app worker"}
+
+
+@app.get("/queue/result/{task_id}")
+async def queue_result(task_id: str):
+    """Get the result of a queued task."""
+    try:
+        from queue.celery_app import app as celery_app
+        result = celery_app.AsyncResult(task_id)
+        return {
+            "task_id": task_id,
+            "status": result.status,
+            "result": result.result if result.ready() else None,
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# --- Autonomous Approval Queue ---
+
+@app.get("/autonomous/approval-queue/{business_id}")
+async def get_approval_queue(business_id: str):
+    """Get all tasks pending human approval for a business."""
+    from strategy.autonomous import AutonomousRunner
+    runner = AutonomousRunner.__new__(AutonomousRunner)
+    return runner.get_approval_queue(business_id)
+
+
+class ApprovalActionRequest(BaseModel):
+    business_id: str
+    task_id: str
+
+
+@app.post("/autonomous/approve-task")
+async def approve_autonomous_task(req: ApprovalActionRequest):
+    """Approve a queued autonomous task for execution."""
+    from strategy.autonomous import AutonomousRunner
+    runner = AutonomousRunner.__new__(AutonomousRunner)
+    return runner.approve_task(req.business_id, req.task_id)
+
+
+@app.post("/autonomous/reject-task")
+async def reject_autonomous_task(req: ApprovalActionRequest):
+    """Reject and discard a queued autonomous task."""
+    from strategy.autonomous import AutonomousRunner
+    runner = AutonomousRunner.__new__(AutonomousRunner)
+    return runner.reject_task(req.business_id, req.task_id)
+
+
+# --- CWV Analysis ---
+
+class CWVRequest(BaseModel):
+    url: str
+    strategy: str = "mobile"
+
+
+@app.post("/cwv")
+async def cwv_analysis(req: CWVRequest):
+    """Analyze Core Web Vitals via PageSpeed Insights API."""
+    from data.analyzers.cwv import CWVAnalyzer
+    analyzer = CWVAnalyzer()
+    result = analyzer.analyze(req.url, req.strategy)
+    return {
+        "url": result.url,
+        "grade": result.overall_grade,
+        "performance_score": result.performance_score,
+        "lcp_ms": result.lcp_ms,
+        "cls_score": result.cls_score,
+        "fcp_ms": result.fcp_ms,
+        "ttfb_ms": result.ttfb_ms,
+        "quick_wins": analyzer.get_quick_wins(result),
+        "opportunities": result.opportunities,
+    }
+
+
 # ---- Run ----
 
 if __name__ == "__main__":
