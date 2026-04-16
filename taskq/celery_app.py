@@ -111,6 +111,7 @@ app.conf.update(
         "taskq.tasks.check_indexing_queue":   {"queue": "execution"},
         "taskq.tasks.run_system_health":      {"queue": "monitoring"},
         "taskq.tasks.run_orphan_detection":   {"queue": "analysis"},
+        "taskq.tasks.sync_aion_signals":      {"queue": "analysis"},
     },
 
     # Beat schedule — all times in UTC
@@ -181,6 +182,11 @@ app.conf.update(
         "run-orphan-detection": {
             "task": "taskq.tasks.run_orphan_detection",
             "schedule": 259200,         # 3 days — internal link health check
+            "options": {"queue": "analysis"},
+        },
+        "sync-aion-signals": {
+            "task": "taskq.tasks.sync_aion_signals",
+            "schedule": 21600,          # 6 hours — pull trending signals from AION
             "options": {"queue": "analysis"},
         },
     },

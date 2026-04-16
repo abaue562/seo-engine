@@ -1635,3 +1635,60 @@ def send_daily_summary(self) -> dict:
         log.exception("send_daily_summary.error  task_id=%s  exc=%s", self.request.id, exc)
         raise self.retry(exc=exc, countdown=60)
 
+
+
+@app.task(bind=True, queue="analysis", max_retries=2, name="taskq.tasks.sync_aion_signals")
+def sync_aion_signals(self) -> dict:
+    """Pull trending signals from AION Research Aggregator and store as content opportunities.
+
+    Runs every 6h. Reads HackerNews + Reddit signals, filters for SEO/content relevance,
+    stores top signals in DB for content calendar use.
+    """
+    log.info("sync_aion_signals.start  task_id=%s", self.request.id)
+    try:
+        from core.aion_bridge import aion
+        from data.storage.database import Database
+
+        db = Database()
+        signals = aion.get_signals(limit=50)
+
+        # Filter for content-relevant signals
+        seo_keywords = {
+            "seo", "content", "marketing", "link", "backlink", "keyword",
+            "google", "search", "traffic", "ranking", "blog", "website",
+            "ai", "tool", "software", "startup", "business", "growth",
+        }
+
+        relevant = []
+        for s in signals:
+            text_lower = (s.get("content", "") + " " + s.get("url", "")).lower()
+            if any(kw in text_lower for kw in seo_keywords):
+                relevant.append(s)
+
+        # Store as content opportunities via memory store
+        stored = 0
+        for s in relevant[:10]:
+            content = (
+                f"Trending signal: {s.get('content', '')} "
+                f"Source: {s.get('source', '')} Score: {s.get('score', 0)} "
+                f"URL: {s.get('url', '')}"
+            )
+            if aion.memory_store(content, tier="episodic", agent_id="seo-engine",
+                                 tags=["signal", "trending", s.get("source", "")]):
+                stored += 1
+
+        result = {
+            "status": "success",
+            "total_signals": len(signals),
+            "relevant_signals": len(relevant),
+            "stored_to_memory": stored,
+            "timestamp": _utc_now(),
+            "task_id": self.request.id,
+        }
+        log.info("sync_aion_signals.done  task_id=%s  relevant=%d  stored=%d",
+                 self.request.id, len(relevant), stored)
+        return result
+
+    except Exception as exc:
+        log.exception("sync_aion_signals.error  task_id=%s  exc=%s", self.request.id, exc)
+        raise self.retry(exc=exc, countdown=120)

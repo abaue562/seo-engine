@@ -210,7 +210,22 @@ Write ONLY the response text. No subject line. No preamble."""
             log.info("haro.sent  outlet=%s  to=%s", query.outlet, query.email)
             return True
         except Exception as e:
-            log.error("haro.send_fail  err=%s", e)
+            log.warning("haro.smtp_fail  err=%s  trying_aion_email", e)
+            # Fallback: AION Email Sender service
+            try:
+                from core.aion_bridge import aion
+                subject = f"Re: {query.category} — {query.outlet}"
+                sent = aion.send_email(
+                    to_email=query.email,
+                    subject=subject,
+                    body_html=f"<pre>{response_text}</pre>",
+                    body_text=response_text,
+                )
+                if sent:
+                    log.info("haro.sent_via_aion  outlet=%s  to=%s", query.outlet, query.email)
+                    return True
+            except Exception as e2:
+                log.error("haro.aion_email_fail  err=%s", e2)
             return False
 
     def save_response(self, response: HAROResponse, storage_path: str = "data/storage/haro/"):

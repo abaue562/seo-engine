@@ -123,7 +123,22 @@ def call_claude(
         RuntimeError: If both CLI and API fail.
     """
     if USE_CLI and not force_api:
-        return _call_cli(prompt, system, model)
+        try:
+            return _call_cli(prompt, system, model)
+        except RuntimeError as e:
+            # CLI failed — try AION Brain (uses Claude Max subscription via proxy)
+            log.warning("claude.cli_failed_trying_aion  err=%s", e)
+            try:
+                from core.aion_bridge import aion
+                result = aion.brain_complete(prompt, system=system, model="claude-max",
+                                             max_tokens=max_tokens)
+                if result:
+                    log.info("claude.aion_fallback_ok  chars=%d", len(result))
+                    return result
+            except Exception as e2:
+                log.warning("claude.aion_fallback_fail  err=%s", e2)
+            raise  # re-raise original error if both fail
+
     return _call_api(prompt, system, max_tokens, model)
 
 

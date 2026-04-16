@@ -1728,11 +1728,20 @@ async def programmatic_queue(req: ProgrammaticRequest):
 
 @app.get("/health/deep")
 async def deep_health():
-    """Full system health check — Claude CLI, Redis, queues, disk, dead-letter."""
+    """Full system health check — Claude CLI, Redis, queues, disk, dead-letter, AION services."""
     from monitoring.health import SystemHealthMonitor
     monitor = SystemHealthMonitor()
     report = await monitor.run_checks()
-    return report.to_dict()
+    result = report.to_dict()
+
+    # Append AION infrastructure health
+    try:
+        from core.aion_bridge import aion
+        result["aion_services"] = aion.health()
+    except Exception as e:
+        result["aion_services"] = {"error": str(e)}
+
+    return result
 
 
 # ── Indexing management ───────────────────────────────────────────────────────
@@ -1872,6 +1881,77 @@ async def canonical_register(req: CanonicalRequest):
         return {"registered": True, "url": req.url, "duplicate": False}
     except SimHashDuplicate as e:
         return {"registered": False, "url": req.url, "duplicate": True, "original_url": str(e).split(": ")[-1]}
+
+
+# ── AION bridge endpoints ─────────────────────────────────────────────────────
+
+class ContentBriefRequest(BaseModel):
+    keyword: str
+    competitor_urls: list[str] = Field(default_factory=list)
+    max_competitors: int = Field(default=4, ge=1, le=8)
+    include_youtube: bool = True
+
+
+@app.post("/content/brief")
+async def content_brief(req: ContentBriefRequest):
+    """Generate a content brief by scraping competitors via AION Firecrawl + Brain.
+
+    Scrapes competitor URLs, extracts headings/word-counts, searches YouTube,
+    then uses AION Brain to synthesize recommended H2s, FAQs, and content gaps.
+    """
+    from core.crawlers.competitor_scraper import CompetitorScraper
+    scraper = CompetitorScraper()
+    brief = scraper.generate_brief(
+        keyword=req.keyword,
+        competitor_urls=req.competitor_urls,
+        max_competitors=req.max_competitors,
+        include_youtube=req.include_youtube,
+    )
+    return scraper.brief_to_dict(brief)
+
+
+class ScrapeRequest(BaseModel):
+    url: str
+
+
+@app.post("/content/scrape")
+async def scrape_url(req: ScrapeRequest):
+    """Scrape a URL to clean markdown via AION Firecrawl (JS-aware)."""
+    from core.aion_bridge import aion
+    meta = aion.firecrawl_scrape_meta(req.url)
+    return meta
+
+
+class SignalsRequest(BaseModel):
+    source: str | None = None
+    limit: int = Field(default=20, ge=1, le=100)
+
+
+@app.get("/content/signals")
+async def content_signals(source: str | None = None, limit: int = 20):
+    """Get trending signals from AION Research Aggregator (HN, Reddit, news).
+
+    Use to discover trending topics for content calendar.
+    """
+    from core.aion_bridge import aion
+    signals = aion.get_signals(source=source, limit=limit)
+    return {"count": len(signals), "signals": signals}
+
+
+class YouTubeResearchRequest(BaseModel):
+    topic: str
+    max_videos: int = Field(default=3, ge=1, le=10)
+
+
+@app.post("/content/youtube-research")
+async def youtube_research(req: YouTubeResearchRequest):
+    """Search YouTube and return video list + transcripts for a topic.
+
+    Use for FAQ enrichment, topic gap analysis, content differentiation.
+    """
+    from core.aion_bridge import aion
+    results = aion.youtube_research(req.topic, max_videos=req.max_videos)
+    return {"topic": req.topic, "count": len(results), "videos": results}
 
 
 # ---- Run ----
