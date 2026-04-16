@@ -75,6 +75,10 @@ WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD", "")
 # draft | publish  — set 'publish' to auto-publish, 'draft' to review first
 WP_PUBLISH_STATUS = os.getenv("WP_PUBLISH_STATUS", "draft")
 
+# Aliases for compatibility with execution/publish/wordpress.py
+WP_SITE_URL    = os.getenv("WP_SITE_URL",    WP_URL)   # falls back to WP_URL
+WP_USERNAME    = os.getenv("WP_USERNAME",    WP_USER)  # falls back to WP_USER
+
 # ── Publishing — Medium ───────────────────────────────────────────────────────
 # Get at: medium.com/me/settings/security → Integration Tokens
 MEDIUM_TOKEN = os.getenv("MEDIUM_TOKEN", "")
