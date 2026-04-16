@@ -399,20 +399,31 @@ class AIONBridge:
 
     def health(self) -> dict[str, bool]:
         """Check which AION services are reachable. Returns {name: bool}."""
+        # Standard /health endpoints
         checks = {
             "brain":     (_BRAIN_URL,     "/health"),
             "memory":    (_MEMORY_URL,    "/health"),
             "knowledge": (_KNOWLEDGE_URL, "/health"),
             "youtube":   (_YOUTUBE_URL,   "/health"),
-            "firecrawl": (_FIRECRAWL_URL, "/health"),
             "email":     (_EMAIL_URL,     "/health"),
             "outbound":  (_OUTBOUND_URL,  "/health"),
             "research":  (_RESEARCH_URL,  "/health"),
         }
-        return {
+        status = {
             name: "error" not in _get(base, path, timeout=5)
             for name, (base, path) in checks.items()
         }
+
+        # Firecrawl uses a different health check (no /health route)
+        try:
+            result = _post(_FIRECRAWL_URL, "/v1/scrape",
+                           {"url": "https://example.com", "formats": ["markdown"]},
+                           timeout=10)
+            status["firecrawl"] = bool(result.get("success"))
+        except Exception:
+            status["firecrawl"] = False
+
+        return status
 
 
 # Global singleton
