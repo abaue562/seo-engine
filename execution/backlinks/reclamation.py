@@ -338,7 +338,20 @@ Return only the email body text, no subject line."""
             log.info("reclamation.sent  to=%s  subject=%s", to_email, subject)
             return True
         except Exception as e:
-            log.error("reclamation.send_fail  err=%s", e)
+            log.warning("reclamation.smtp_fail  err=%s  trying_aion_email", e)
+            try:
+                from core.aion_bridge import aion
+                sent = aion.send_email(
+                    to_email=to_email,
+                    subject=subject,
+                    body_html=f"<pre>{body}</pre>",
+                    body_text=body,
+                )
+                if sent:
+                    log.info("reclamation.sent_via_aion  to=%s", to_email)
+                    return True
+            except Exception as e2:
+                log.error("reclamation.aion_email_fail  err=%s", e2)
             return False
 
     def save_outreach(self, record: OutreachRecord, storage_path: str = "data/storage/outreach/"):

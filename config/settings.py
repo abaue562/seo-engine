@@ -136,3 +136,23 @@ PROXY_LIST = [p.strip() for p in os.getenv("PROXY_LIST", "").split(",") if p.str
 # ── Wikidata ──────────────────────────────────────────────────────────────────
 WIKIDATA_USERNAME = os.getenv("WIKIDATA_USERNAME", "")
 WIKIDATA_PASSWORD = os.getenv("WIKIDATA_PASSWORD", "")
+
+# AION v21 service URLs (same VPS)
+AION_BRAIN_URL        = os.getenv("AION_BRAIN_URL",        "http://localhost:9082")
+AION_MEMORY_URL       = os.getenv("AION_MEMORY_URL",       "http://localhost:9190")
+AION_KNOWLEDGE_URL    = os.getenv("AION_KNOWLEDGE_URL",    "http://localhost:9091")
+AION_YOUTUBE_URL      = os.getenv("AION_YOUTUBE_URL",      "http://localhost:9240")
+AION_FIRECRAWL_URL    = os.getenv("AION_FIRECRAWL_URL",    "http://localhost:3002")
+AION_EMAIL_URL        = os.getenv("AION_EMAIL_URL",        "http://localhost:9280")
+AION_OUTBOUND_URL     = os.getenv("AION_OUTBOUND_URL",     "http://localhost:9301")
+AION_RESEARCH_URL     = os.getenv("AION_RESEARCH_URL",     "http://localhost:9250")
+AION_TWITTER_URL      = os.getenv("AION_TWITTER_URL",      "http://localhost:8195")
+AION_GPT_RESEARCHER_URL = os.getenv("AION_GPT_RESEARCHER_URL", "http://localhost:8170")
+AION_LISTMONK_URL     = os.getenv("AION_LISTMONK_URL",     "http://localhost:9001")
+AION_LISTMONK_USER    = os.getenv("AION_LISTMONK_USER",    "admin")
+AION_LISTMONK_PASS    = os.getenv("AION_LISTMONK_PASS",    "AionAdmin2026!")
+OLLAMA_URL            = os.getenv("OLLAMA_URL",            "http://localhost:11434")
+
+# Site URL (used for llms.txt generation, sitemaps, canonical URLs)
+SITE_URL = os.getenv("SITE_URL", "")
+FROM_EMAIL = os.getenv("FROM_EMAIL", "aion@gethubed.com")

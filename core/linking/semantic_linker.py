@@ -1,10 +1,14 @@
 """Semantic similarity-based internal linking.
 
-Uses TF-IDF cosine similarity (stdlib only, no ML dependencies) to find
-related pages and enforce pillar → cluster linking structure.
+PRIMARY: Ollama nomic-embed-text (768-dim real embeddings, free, local)
+FALLBACK: TF-IDF cosine similarity (stdlib only, no ML dependencies)
+
+The embedding-based approach produces dramatically better link suggestions
+because nomic-embed-text understands semantic meaning, not just term overlap.
 
 Key features:
-- TF-IDF cosine similarity (no sklearn/numpy required)
+- nomic-embed-text embeddings via Ollama (primary, free, local)
+- TF-IDF cosine similarity fallback (if Ollama unavailable)
 - Pillar page detection and enforcement
 - Orphan page detection
 - Authority flow prioritization (more links flow to pillar pages)
@@ -23,6 +27,22 @@ if TYPE_CHECKING:
     from data.db import SEODatabase
 
 log = logging.getLogger(__name__)
+
+# Check if Ollama embeddings are available at startup
+_OLLAMA_AVAILABLE: bool | None = None  # None = not yet checked
+
+
+def _check_ollama() -> bool:
+    global _OLLAMA_AVAILABLE
+    if _OLLAMA_AVAILABLE is None:
+        try:
+            from core.aion_bridge import aion
+            vec = aion.embed("test")
+            _OLLAMA_AVAILABLE = len(vec) > 0
+        except Exception:
+            _OLLAMA_AVAILABLE = False
+        log.info("semantic_linker.ollama_available=%s", _OLLAMA_AVAILABLE)
+    return _OLLAMA_AVAILABLE
 
 _STOPWORDS = {
     "a", "an", "the", "and", "or", "but", "in", "on", "at", "to", "for",
@@ -63,13 +83,42 @@ class LinkRecommendation:
 
 
 class SemanticLinker:
-    """TF-IDF based internal link recommender with pillar enforcement."""
+    """Embedding-based internal link recommender with pillar enforcement.
+
+    Uses Ollama nomic-embed-text when available (recommended), falls back
+    to TF-IDF for environments without Ollama.
+    """
 
     def __init__(self, db: "SEODatabase" = None):
         self.db = db
 
     # ----------------------------------------------------------------
-    # Text processing
+    # Embedding-based similarity (primary — nomic-embed-text)
+    # ----------------------------------------------------------------
+
+    def _embed_texts(self, texts: list[str]) -> list[list[float]] | None:
+        """Get embeddings for a list of texts. Returns None if Ollama unavailable."""
+        if not _check_ollama():
+            return None
+        try:
+            from core.aion_bridge import aion
+            vecs = [aion.embed(t) for t in texts]
+            if any(len(v) == 0 for v in vecs):
+                return None
+            return vecs
+        except Exception as e:
+            log.warning("semantic_linker.embed_fail  err=%s", e)
+            return None
+
+    def _vec_cosine(self, a: list[float], b: list[float]) -> float:
+        """Cosine similarity between two float vectors."""
+        dot = sum(x * y for x, y in zip(a, b))
+        na = sum(x * x for x in a) ** 0.5
+        nb = sum(x * x for x in b) ** 0.5
+        return dot / (na * nb) if na and nb else 0.0
+
+    # ----------------------------------------------------------------
+    # TF-IDF fallback
     # ----------------------------------------------------------------
 
     def _tokenize(self, text: str) -> list[str]:
@@ -120,13 +169,29 @@ class SemanticLinker:
     # ----------------------------------------------------------------
 
     def build_link_graph(self, pages: list[PageNode]) -> list[LinkRecommendation]:
-        """Compute similarity between all page pairs and recommend links."""
+        """Compute similarity between all page pairs and recommend links.
+
+        Uses nomic-embed-text embeddings (primary) or TF-IDF (fallback).
+        Embedding-based similarity is dramatically more accurate for semantic linking.
+        """
         if len(pages) < 2:
             return []
 
-        # Build text representations
         texts = [f"{p.keyword} {p.title} {p.content_snippet}" for p in pages]
-        vectors = self._compute_tfidf(texts)
+
+        # Try embedding-based approach first
+        embed_vecs = self._embed_texts(texts)
+        using_embeddings = embed_vecs is not None
+
+        if using_embeddings:
+            log.info("semantic_linker.using_embeddings  pages=%d  dims=%d",
+                     len(pages), len(embed_vecs[0]) if embed_vecs else 0)
+        else:
+            log.info("semantic_linker.using_tfidf  pages=%d", len(pages))
+            tfidf_vecs = self._compute_tfidf(texts)
+
+        # Similarity threshold — embeddings use 0.65+, TF-IDF uses 0.25+
+        sim_threshold = 0.65 if using_embeddings else 0.25
 
         recommendations: list[LinkRecommendation] = []
 
@@ -138,8 +203,12 @@ class SemanticLinker:
                 if page_a.url == page_b.url:
                     continue
 
-                sim = self._cosine_similarity(vectors[i], vectors[j])
-                if sim < 0.25:
+                if using_embeddings:
+                    sim = self._vec_cosine(embed_vecs[i], embed_vecs[j])
+                else:
+                    sim = self._cosine_similarity(tfidf_vecs[i], tfidf_vecs[j])
+
+                if sim < sim_threshold:
                     continue
 
                 # Determine priority

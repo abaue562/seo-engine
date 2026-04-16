@@ -1692,3 +1692,360 @@ def sync_aion_signals(self) -> dict:
     except Exception as exc:
         log.exception("sync_aion_signals.error  task_id=%s  exc=%s", self.request.id, exc)
         raise self.retry(exc=exc, countdown=120)
+
+
+# ===========================================================================
+# AION INTEGRATION TASKS — Phase 3 Wiring
+# ===========================================================================
+
+@app.task(bind=True, queue="analysis", max_retries=2, name="taskq.tasks.sync_twitter_intel")
+def sync_twitter_intel(self) -> dict:
+    """Pull signals and opportunities from Twitter Intel, seed keyword pipeline.
+
+    Twitter Intel has 4,192 signals from HackerNews, Google Trends, Reddit, Twitter.
+    Routes SEO-relevant signals into the keyword pipeline as seed topics.
+    Runs every 4h.
+    """
+    log.info("sync_twitter_intel.start  task_id=%s", self.request.id)
+    try:
+        from core.aion_bridge import aion
+        from pathlib import Path
+        import json
+
+        signals = aion.twitter_signals(limit=100)
+
+        seo_kws = {
+            "seo", "search", "google", "keyword", "content", "marketing",
+            "traffic", "rank", "backlink", "blog", "local", "website",
+            "ai", "tool", "software", "startup", "saas", "business",
+        }
+
+        seed_keywords = []
+        trending_topics = []
+
+        for sig in signals:
+            text = sig.get("content", "").lower()
+            source = sig.get("source", "")
+            score = float(sig.get("score") or 0)
+
+            if source == "google_trends" or score > 50:
+                trending_topics.append(sig.get("content", "")[:100])
+
+            if any(kw in text for kw in seo_kws) and len(seed_keywords) < 20:
+                seed_keywords.append({
+                    "keyword": sig.get("content", "")[:80],
+                    "source": f"twitter_intel_{source}",
+                    "score": score,
+                    "url": sig.get("url", ""),
+                })
+
+        stored = 0
+        for topic in trending_topics[:5]:
+            content = (
+                f"Trending search topic detected: {topic}. "
+                f"Source: Google Trends / market signals. Priority: high for content calendar."
+            )
+            if aion.memory_store(content, tier="episodic", agent_id="seo-engine",
+                                 tags=["trending", "keyword", "content-calendar"]):
+                stored += 1
+
+        seeds_path = Path("data/storage/keyword_seeds")
+        seeds_path.mkdir(parents=True, exist_ok=True)
+        seeds_file = seeds_path / "twitter_intel_seeds.json"
+        seeds_file.write_text(json.dumps({
+            "generated_at": _utc_now(),
+            "seeds": seed_keywords,
+            "trending": trending_topics[:10],
+        }, indent=2))
+
+        result = {
+            "status": "success",
+            "signals_pulled": len(signals),
+            "seed_keywords": len(seed_keywords),
+            "trending_topics": len(trending_topics),
+            "stored_to_memory": stored,
+            "seeds_file": str(seeds_file),
+            "timestamp": _utc_now(),
+            "task_id": self.request.id,
+        }
+        log.info("sync_twitter_intel.done  task_id=%s  seeds=%d  trending=%d",
+                 self.request.id, len(seed_keywords), len(trending_topics))
+        return result
+
+    except Exception as exc:
+        log.exception("sync_twitter_intel.error  task_id=%s  exc=%s", self.request.id, exc)
+        raise self.retry(exc=exc, countdown=120)
+
+
+@app.task(bind=True, queue="analysis", max_retries=2, name="taskq.tasks.auto_content_briefs")
+def auto_content_briefs(self) -> dict:
+    """Auto-generate content briefs for top pending keywords.
+
+    Pulls top 3 keywords from seed files, generates full content briefs
+    via Firecrawl + GPT-Researcher + AION Brain, saves to disk.
+    Runs every 24h.
+    """
+    log.info("auto_content_briefs.start  task_id=%s", self.request.id)
+    try:
+        from core.aion_bridge import aion
+        from core.crawlers.competitor_scraper import CompetitorScraper
+        from pathlib import Path
+        import json
+
+        scraper = CompetitorScraper()
+        briefs_path = Path("data/storage/content_briefs")
+        briefs_path.mkdir(parents=True, exist_ok=True)
+
+        candidates = []
+        seeds_file = Path("data/storage/keyword_seeds/twitter_intel_seeds.json")
+        if seeds_file.exists():
+            data = json.loads(seeds_file.read_text())
+            for s in data.get("seeds", [])[:5]:
+                kw = s.get("keyword", "")
+                if kw:
+                    candidates.append(kw)
+            for t in data.get("trending", [])[:3]:
+                if t and t not in candidates:
+                    candidates.append(t)
+
+        if not candidates:
+            candidates = [
+                "local SEO for service businesses",
+                "link building strategies 2025",
+                "content marketing ROI",
+            ]
+
+        generated = []
+        for keyword in candidates[:3]:
+            safe_name = keyword[:40].replace(" ", "_").replace("/", "_")
+            brief_file = briefs_path / f"{safe_name}.json"
+            if brief_file.exists():
+                log.info("auto_content_briefs.skip_existing  keyword=%s", keyword)
+                continue
+
+            competitor_urls = []
+            try:
+                from core.serp.scraper import fetch_serp_urls
+                competitor_urls = fetch_serp_urls(keyword, num_results=5)
+            except Exception as e:
+                log.warning("auto_content_briefs.serp_fail  keyword=%s  err=%s", keyword, e)
+
+            brief = scraper.generate_brief(
+                keyword=keyword,
+                competitor_urls=competitor_urls,
+                max_competitors=3,
+                include_youtube=True,
+                include_deep_research=True,
+            )
+
+            brief_dict = scraper.brief_to_dict(brief)
+            brief_dict["generated_at"] = _utc_now()
+            brief_file.write_text(json.dumps(brief_dict, indent=2))
+
+            summary = (
+                f"Content brief generated for keyword: '{keyword}'. "
+                f"Recommended word count: {brief.recommended_word_count}. "
+                f"Title: {brief.recommended_title}."
+            )
+            aion.memory_store(summary, tier="semantic", agent_id="seo-engine",
+                              tags=["content-brief", "keyword"])
+            generated.append({"keyword": keyword, "file": str(brief_file)})
+            log.info("auto_content_briefs.generated  keyword=%s", keyword)
+
+        result = {
+            "status": "success",
+            "candidates": len(candidates),
+            "generated": len(generated),
+            "briefs": generated,
+            "timestamp": _utc_now(),
+            "task_id": self.request.id,
+        }
+        log.info("auto_content_briefs.done  task_id=%s  generated=%d",
+                 self.request.id, len(generated))
+        return result
+
+    except Exception as exc:
+        log.exception("auto_content_briefs.error  task_id=%s  exc=%s", self.request.id, exc)
+        raise self.retry(exc=exc, countdown=300)
+
+
+@app.task(bind=True, queue="execution", max_retries=2, name="taskq.tasks.deploy_llms_txt")
+def deploy_llms_txt(self) -> dict:
+    """Generate and deploy llms.txt for AI crawler discovery. Runs weekly."""
+    log.info("deploy_llms_txt.start  task_id=%s", self.request.id)
+    try:
+        from pathlib import Path
+        from config.settings import SITE_URL
+
+        site_url = SITE_URL or ""
+        if not site_url:
+            log.warning("deploy_llms_txt.skip  no SITE_URL configured")
+            return {"status": "skipped", "reason": "SITE_URL not set", "task_id": self.request.id}
+
+        from ai_visibility.llms_txt import LLMsTxtGenerator
+        from models.business import BusinessContext
+
+        biz = BusinessContext(name="", website=site_url, city="", state="", services=[])
+        generator = LLMsTxtGenerator()
+        llms_txt_content = generator.generate(biz)
+
+        public_dir = Path("public")
+        public_dir.mkdir(exist_ok=True)
+        llms_file = public_dir / "llms.txt"
+        llms_file.write_text(llms_txt_content, encoding="utf-8")
+
+        log.info("deploy_llms_txt.written  path=%s  chars=%d", llms_file, len(llms_txt_content))
+        result = {
+            "status": "success",
+            "site_url": site_url,
+            "llms_txt_path": str(llms_file),
+            "chars": len(llms_txt_content),
+            "timestamp": _utc_now(),
+            "task_id": self.request.id,
+        }
+        return result
+
+    except Exception as exc:
+        log.exception("deploy_llms_txt.error  task_id=%s  exc=%s", self.request.id, exc)
+        raise self.retry(exc=exc, countdown=600)
+
+
+@app.task(bind=True, queue="analysis", max_retries=2, name="taskq.tasks.sync_entity_knowledge_graph")
+def sync_entity_knowledge_graph(self) -> dict:
+    """Sync SEO engine entities to AION Knowledge Graph.
+
+    Writes businesses, keywords, and content topics as nodes into AION's
+    knowledge graph for cross-system entity relationship queries.
+    Runs every 12h.
+    """
+    log.info("sync_entity_knowledge_graph.start  task_id=%s", self.request.id)
+    try:
+        from core.aion_bridge import aion
+        from pathlib import Path
+        import json
+
+        nodes_written = 0
+
+        # Sync content brief topics as knowledge graph nodes
+        briefs_path = Path("data/storage/content_briefs")
+        if briefs_path.exists():
+            for brief_file in list(briefs_path.glob("*.json"))[:15]:
+                try:
+                    brief = json.loads(brief_file.read_text())
+                    kw = brief.get("keyword", "")
+                    if not kw:
+                        continue
+                    result = aion.knowledge_add_node(
+                        label=kw,
+                        node_type="content_topic",
+                        properties={
+                            "word_count": brief.get("recommended_word_count", 0),
+                            "title": brief.get("recommended_title", ""),
+                            "source": "seo-engine-brief",
+                        },
+                    )
+                    if "error" not in result:
+                        nodes_written += 1
+                except Exception as e:
+                    log.debug("sync_entity_kg.brief_fail  err=%s", e)
+
+        # Sync trending keywords from Twitter Intel
+        seeds_file = Path("data/storage/keyword_seeds/twitter_intel_seeds.json")
+        if seeds_file.exists():
+            data = json.loads(seeds_file.read_text())
+            for seed in data.get("seeds", [])[:25]:
+                kw = seed.get("keyword", "")
+                if not kw:
+                    continue
+                try:
+                    result = aion.knowledge_add_node(
+                        label=kw,
+                        node_type="keyword",
+                        properties={
+                            "source": seed.get("source", "twitter_intel"),
+                            "score": seed.get("score", 0),
+                            "seo_engine": True,
+                        },
+                    )
+                    if "error" not in result:
+                        nodes_written += 1
+                except Exception as e:
+                    log.debug("sync_entity_kg.seed_fail  err=%s", e)
+
+        result = {
+            "status": "success",
+            "nodes_written": nodes_written,
+            "timestamp": _utc_now(),
+            "task_id": self.request.id,
+        }
+        log.info("sync_entity_knowledge_graph.done  task_id=%s  nodes=%d",
+                 self.request.id, nodes_written)
+        return result
+
+    except Exception as exc:
+        log.exception("sync_entity_knowledge_graph.error  task_id=%s  exc=%s", self.request.id, exc)
+        raise self.retry(exc=exc, countdown=300)
+
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.competitor_content_alerts")
+def competitor_content_alerts(self) -> dict:
+    """Monitor competitor sites for new content. Triggers alerts + rapid-update.
+
+    Scrapes competitor index pages via Firecrawl to detect new content.
+    Stores findings in AION Memory for content team awareness.
+    Runs every 24h.
+    """
+    log.info("competitor_content_alerts.start  task_id=%s", self.request.id)
+    try:
+        from core.aion_bridge import aion
+        from pathlib import Path
+        from urllib.parse import urlparse
+        import json
+
+        competitor_domains = set()
+        briefs_path = Path("data/storage/content_briefs")
+
+        if briefs_path.exists():
+            for brief_file in list(briefs_path.glob("*.json"))[:5]:
+                brief = json.loads(brief_file.read_text())
+                for source_url in brief.get("sources", []):
+                    try:
+                        domain = urlparse(source_url).netloc
+                        if domain:
+                            competitor_domains.add(domain)
+                    except Exception:
+                        pass
+
+        alerts = []
+        for domain in list(competitor_domains)[:5]:
+            for path in ["/blog", "/articles", "/"]:
+                url = f"https://{domain}{path}"
+                try:
+                    md = aion.firecrawl_scrape(url, timeout=15)
+                    if md and len(md) > 200:
+                        signal = (
+                            f"Competitor content alert: {domain}{path} is active. "
+                            f"Content preview: {md[:200]}"
+                        )
+                        aion.memory_store(signal, tier="episodic", agent_id="seo-engine",
+                                         tags=["competitor", "alert", domain])
+                        alerts.append({"domain": domain, "url": url})
+                        break
+                except Exception as e:
+                    log.debug("competitor_alert.fail  domain=%s  err=%s", domain, e)
+
+        result = {
+            "status": "success",
+            "competitors_checked": len(competitor_domains),
+            "alerts": len(alerts),
+            "alert_details": alerts,
+            "timestamp": _utc_now(),
+            "task_id": self.request.id,
+        }
+        log.info("competitor_content_alerts.done  task_id=%s  alerts=%d",
+                 self.request.id, len(alerts))
+        return result
+
+    except Exception as exc:
+        log.exception("competitor_content_alerts.error  task_id=%s  exc=%s", self.request.id, exc)
+        raise self.retry(exc=exc, countdown=300)

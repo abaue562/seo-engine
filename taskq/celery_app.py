@@ -111,7 +111,13 @@ app.conf.update(
         "taskq.tasks.check_indexing_queue":   {"queue": "execution"},
         "taskq.tasks.run_system_health":      {"queue": "monitoring"},
         "taskq.tasks.run_orphan_detection":   {"queue": "analysis"},
-        "taskq.tasks.sync_aion_signals":      {"queue": "analysis"},
+        "taskq.tasks.sync_aion_signals":           {"queue": "analysis"},
+        # Phase 3 — AION wiring
+        "taskq.tasks.sync_twitter_intel":          {"queue": "analysis"},
+        "taskq.tasks.auto_content_briefs":         {"queue": "analysis"},
+        "taskq.tasks.deploy_llms_txt":             {"queue": "execution"},
+        "taskq.tasks.sync_entity_knowledge_graph": {"queue": "analysis"},
+        "taskq.tasks.competitor_content_alerts":   {"queue": "monitoring"},
     },
 
     # Beat schedule — all times in UTC
@@ -186,8 +192,34 @@ app.conf.update(
         },
         "sync-aion-signals": {
             "task": "taskq.tasks.sync_aion_signals",
-            "schedule": 21600,          # 6 hours — pull trending signals from AION
+            "schedule": 21600,          # 6 hours — AION Research Aggregator signals
             "options": {"queue": "analysis"},
+        },
+        # ── Phase 3 — AION wiring schedules ───────────────────────────────
+        "sync-twitter-intel": {
+            "task": "taskq.tasks.sync_twitter_intel",
+            "schedule": 14400,          # 4 hours — Twitter Intel market signals
+            "options": {"queue": "analysis"},
+        },
+        "auto-content-briefs": {
+            "task": "taskq.tasks.auto_content_briefs",
+            "schedule": 86400,          # 24 hours — auto-generate content briefs
+            "options": {"queue": "analysis"},
+        },
+        "deploy-llms-txt": {
+            "task": "taskq.tasks.deploy_llms_txt",
+            "schedule": 604800,         # 7 days — weekly llms.txt deployment
+            "options": {"queue": "execution"},
+        },
+        "sync-entity-knowledge-graph": {
+            "task": "taskq.tasks.sync_entity_knowledge_graph",
+            "schedule": 43200,          # 12 hours — entity graph sync
+            "options": {"queue": "analysis"},
+        },
+        "competitor-content-alerts": {
+            "task": "taskq.tasks.competitor_content_alerts",
+            "schedule": 86400,          # 24 hours — competitor content monitoring
+            "options": {"queue": "monitoring"},
         },
     },
 )

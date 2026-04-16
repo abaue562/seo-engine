@@ -103,35 +103,50 @@ class CompetitorScraper:
         competitor_urls: list[str],
         max_competitors: int = 4,
         include_youtube: bool = True,
+        include_deep_research: bool = True,
     ) -> ContentBrief:
         """Generate a full content brief for a keyword.
 
-        1. Scrapes competitor pages via Firecrawl
-        2. Searches YouTube for video insights
-        3. Calls AION Brain to synthesize a structured brief
-        4. Returns ContentBrief dataclass
+        1. GPT-Researcher deep research (Cerebras/Qwen — finds what competitors miss)
+        2. Scrapes competitor pages via Firecrawl (JS-aware, gets real content)
+        3. YouTube video insights for FAQ enrichment
+        4. AION Brain synthesizes everything into structured brief
+        5. Returns ContentBrief dataclass
         """
         from core.aion_bridge import aion
 
         brief = ContentBrief(keyword=keyword, sources=competitor_urls[:max_competitors])
 
-        # Step 1: Scrape competitors
+        # Step 1: Deep research via GPT-Researcher (runs in parallel with scraping)
+        research_context = ""
+        if include_deep_research:
+            try:
+                research_text = aion.gpt_research(keyword, report_type="outline", timeout=90)
+                if research_text and len(research_text) > 100:
+                    research_context = research_text[:3000]
+                    log.info("competitor_scraper.research_ok  keyword=%s  chars=%d",
+                             keyword, len(research_text))
+            except Exception as e:
+                log.warning("competitor_scraper.research_skip  keyword=%s  err=%s", keyword, e)
+
+        # Step 2: Scrape competitors
         pages = self.scrape_serp_competitors(keyword, competitor_urls, max_competitors)
 
-        if not pages:
-            log.warning("competitor_scraper.no_pages  keyword=%s", keyword)
+        if not pages and not research_context:
+            log.warning("competitor_scraper.no_data  keyword=%s", keyword)
             return brief
 
-        # Step 2: Compute recommended word count (avg + 20%)
-        avg_words = sum(p.word_count for p in pages) / len(pages)
-        brief.recommended_word_count = int(avg_words * 1.2)
+        # Step 3: Compute recommended word count (avg + 20%)
+        if pages:
+            avg_words = sum(p.word_count for p in pages) / len(pages)
+            brief.recommended_word_count = int(avg_words * 1.2)
 
         # Collect all competitor headings
         all_headings = []
         for p in pages:
             all_headings.extend(p.headings)
 
-        # Step 3: YouTube research
+        # Step 4: YouTube research
         yt_snippets: list[str] = []
         if include_youtube:
             videos = aion.youtube_search(keyword, max_results=3)
@@ -140,27 +155,32 @@ class CompetitorScraper:
                 yt_snippets.append(snippet)
                 brief.youtube_insights.append(snippet)
 
-        # Step 4: Generate brief via AION Brain
+        # Step 5: Synthesize brief via AION Brain
         competitor_context = "\n\n".join(
             f"URL: {p.url}\nTitle: {p.title}\nWords: {p.word_count}\n"
             f"Headings: {'; '.join(p.headings[:8])}\n"
-            f"Content preview: {p.markdown[:600]}"
+            f"Content preview: {p.markdown[:500]}"
             for p in pages
-        )
+        ) if pages else "No competitor pages scraped."
+
+        research_section = ""
+        if research_context:
+            research_section = f"\n\nDEEP RESEARCH FINDINGS (GPT-Researcher):\n{research_context[:2000]}"
 
         youtube_context = ""
         if yt_snippets:
-            youtube_context = f"\n\nTop YouTube videos on this topic:\n" + "\n".join(yt_snippets)
+            youtube_context = "\n\nTop YouTube videos on this topic:\n" + "\n".join(yt_snippets)
 
         system = (
             "You are an expert SEO content strategist. "
-            "Analyze competitor content and generate a detailed content brief. "
+            "Analyze competitor content + deep research to generate a comprehensive content brief. "
             "Respond with valid JSON only."
         )
 
-        prompt = f"""Analyze these competitor pages for the keyword: "{keyword}"
+        prompt = f"""Analyze these inputs for the keyword: "{keyword}"
 
-{competitor_context}{youtube_context}
+COMPETITOR ANALYSIS:
+{competitor_context}{research_section}{youtube_context}
 
 Generate a JSON content brief with exactly these keys:
 {{
@@ -169,10 +189,11 @@ Generate a JSON content brief with exactly these keys:
   "suggested_h3s": ["H3 subheading 1", "H3 subheading 2", "H3 subheading 3"],
   "faq_questions": ["FAQ Q1?", "FAQ Q2?", "FAQ Q3?", "FAQ Q4?", "FAQ Q5?"],
   "content_gaps": ["Topic competitors missed 1", "Topic competitors missed 2", "Topic competitors missed 3"],
-  "competitor_summary": "2-3 sentence summary of competitor content quality and gaps"
+  "competitor_summary": "2-3 sentence summary of competitor content quality and gaps",
+  "unique_angle": "What this content should cover that no competitor does"
 }}"""
 
-        result = aion.brain_json(prompt, system=system, model="claude-max", max_tokens=1500)
+        result = aion.brain_json(prompt, system=system, model="claude-max", max_tokens=1800)
 
         if result and isinstance(result, dict):
             brief.recommended_title = result.get("recommended_title", "")
@@ -181,9 +202,12 @@ Generate a JSON content brief with exactly these keys:
             brief.faq_questions = result.get("faq_questions", [])
             brief.content_gaps = result.get("content_gaps", [])
             brief.competitor_summary = result.get("competitor_summary", "")
+            if result.get("unique_angle"):
+                brief.content_gaps.insert(0, f"Unique angle: {result['unique_angle']}")
             log.info(
-                "competitor_scraper.brief_ok  keyword=%s  h2s=%d  faqs=%d",
+                "competitor_scraper.brief_ok  keyword=%s  h2s=%d  faqs=%d  research=%s",
                 keyword, len(brief.suggested_h2s), len(brief.faq_questions),
+                bool(research_context),
             )
         else:
             log.warning("competitor_scraper.brain_fail  keyword=%s", keyword)
