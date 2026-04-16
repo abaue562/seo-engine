@@ -1256,6 +1256,324 @@ def run_topical_gap_check(self, business_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # Task: send_daily_summary
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Task: run_programmatic_batch
+# ---------------------------------------------------------------------------
+@app.task(bind=True, queue="execution", max_retries=2, name="taskq.tasks.run_programmatic_batch")
+def run_programmatic_batch(self, business_id: str = "", pages_per_day: int = 10) -> dict:
+    """Generate and queue programmatic SEO pages (location × service × modifier)."""
+    log.info("run_programmatic_batch.start  task_id=%s  business_id=%s", self.request.id, business_id)
+    try:
+        from core.programmatic.generator import ProgrammaticGenerator
+        import json
+        from pathlib import Path
+
+        biz_file = Path("data/storage/businesses.json")
+        business_data = {}
+        if biz_file.exists():
+            all_biz = json.loads(biz_file.read_text())
+            business_data = next((b for b in all_biz if b.get("id") == business_id), {})
+
+        if not business_data:
+            return {"status": "skipped", "reason": "business not found", "task_id": self.request.id}
+
+        gen = ProgrammaticGenerator()
+        matrix = gen.generate_matrix(
+            services=business_data.get("services", [business_data.get("service_type", "service")]),
+            cities=None,  # uses default 100-city list
+            modifiers=None,
+        )
+        calendar = gen.to_publish_calendar(matrix, pages_per_day=pages_per_day)
+
+        # Queue pages due today
+        today_pages = calendar[:pages_per_day]
+        queued = []
+        for entry in today_pages:
+            task = run_content_pipeline.apply_async(
+                args=[business_data, entry["keyword"], "location_page"],
+                queue="execution",
+            )
+            queued.append({"keyword": entry["keyword"], "task_id": task.id})
+
+        result = {
+            "status": "success",
+            "business_id": business_id,
+            "matrix_size": len(matrix),
+            "calendar_total": len(calendar),
+            "queued_today": len(queued),
+            "queued": queued,
+            "timestamp": _utc_now(),
+            "task_id": self.request.id,
+        }
+        _save_result(self.request.id, result)
+        log.info("run_programmatic_batch.done  task_id=%s  queued=%d", self.request.id, len(queued))
+        return result
+
+    except Exception as exc:
+        log.exception("run_programmatic_batch.error  task_id=%s  exc=%s", self.request.id, exc)
+        raise self.retry(exc=exc, countdown=2 ** self.request.retries * 60)
+
+
+# ---------------------------------------------------------------------------
+# Task: run_haro_check
+# ---------------------------------------------------------------------------
+@app.task(bind=True, queue="execution", max_retries=1, name="taskq.tasks.run_haro_check")
+def run_haro_check(self, business_id: str = "") -> dict:
+    """Poll HARO inbox, match queries to business, draft + send responses."""
+    log.info("run_haro_check.start  task_id=%s  business_id=%s", self.request.id, business_id)
+    try:
+        from execution.backlinks.haro import HAROIngester, HAROEmailPoller, HAROResponse
+        import json
+        from pathlib import Path
+
+        try:
+            from config.settings import (
+                IMAP_HOST, IMAP_USER, IMAP_PASS,
+                SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS,
+            )
+        except ImportError:
+            IMAP_HOST = IMAP_USER = IMAP_PASS = ""
+            SMTP_HOST = SMTP_USER = SMTP_PASS = ""
+            SMTP_PORT = 587
+
+        biz_file = Path("data/storage/businesses.json")
+        business = {}
+        if biz_file.exists():
+            all_biz = json.loads(biz_file.read_text())
+            business = next((b for b in all_biz if b.get("id") == business_id), {})
+
+        poller = HAROEmailPoller(IMAP_HOST, IMAP_USER, IMAP_PASS)
+        digest = poller.fetch_latest_digest()
+        if not digest:
+            return {"status": "skipped", "reason": "no new HARO digest", "task_id": self.request.id}
+
+        ingester = HAROIngester()
+        queries = ingester.parse_digest(digest)
+        matches = ingester.match_to_business(queries, business, min_score=0.3)
+
+        # Rate limit: max 5 responses/day
+        sent_today = ingester.get_sent_today()
+        remaining = max(0, 5 - len(sent_today))
+        sent_count = 0
+
+        smtp_config = {"host": SMTP_HOST, "port": SMTP_PORT, "user": SMTP_USER, "pass": SMTP_PASS}
+
+        for query, score in matches[:remaining]:
+            response_text = _run_async(ingester.draft_response(query, business))
+            ok = _run_async(ingester.send_response(
+                query, response_text,
+                sender_email=SMTP_USER,
+                sender_name=business.get("contact_name", ""),
+                smtp_config=smtp_config,
+            ))
+            if ok:
+                ingester.save_response(HAROResponse(
+                    query={"outlet": query.outlet, "category": query.category},
+                    business_name=business.get("name", ""),
+                    response_text=response_text,
+                    sent_at=_utc_now(),
+                    status="sent",
+                ))
+                sent_count += 1
+
+        result = {
+            "status": "success",
+            "queries_found": len(queries),
+            "matches": len(matches),
+            "sent": sent_count,
+            "timestamp": _utc_now(),
+            "task_id": self.request.id,
+        }
+        _save_result(self.request.id, result)
+        log.info("run_haro_check.done  task_id=%s  matches=%d  sent=%d", self.request.id, len(matches), sent_count)
+        return result
+
+    except Exception as exc:
+        log.exception("run_haro_check.error  task_id=%s  exc=%s", self.request.id, exc)
+        raise self.retry(exc=exc, countdown=60)
+
+
+# ---------------------------------------------------------------------------
+# Task: run_link_reclamation
+# ---------------------------------------------------------------------------
+@app.task(bind=True, queue="execution", max_retries=1, name="taskq.tasks.run_link_reclamation")
+def run_link_reclamation(self, business_id: str = "") -> dict:
+    """Find unlinked brand mentions and send link reclamation outreach."""
+    log.info("run_link_reclamation.start  task_id=%s  business_id=%s", self.request.id, business_id)
+    try:
+        from execution.backlinks.reclamation import run_reclamation_campaign
+        import json
+        from pathlib import Path
+
+        try:
+            from config.settings import SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS
+        except ImportError:
+            SMTP_HOST = SMTP_USER = SMTP_PASS = ""
+            SMTP_PORT = 587
+
+        biz_file = Path("data/storage/businesses.json")
+        business = {}
+        if biz_file.exists():
+            all_biz = json.loads(biz_file.read_text())
+            business = next((b for b in all_biz if b.get("id") == business_id), {})
+
+        smtp_config = {"host": SMTP_HOST, "port": SMTP_PORT, "user": SMTP_USER, "pass": SMTP_PASS}
+        campaign_result = _run_async(run_reclamation_campaign(business, smtp_config))
+
+        result = {
+            "status": "success",
+            "business_id": business_id,
+            **campaign_result,
+            "timestamp": _utc_now(),
+            "task_id": self.request.id,
+        }
+        _save_result(self.request.id, result)
+        log.info("run_link_reclamation.done  task_id=%s  sent=%d",
+                 self.request.id, campaign_result.get("reclamation_sent", 0))
+        return result
+
+    except Exception as exc:
+        log.exception("run_link_reclamation.error  task_id=%s  exc=%s", self.request.id, exc)
+        raise self.retry(exc=exc, countdown=60)
+
+
+# ---------------------------------------------------------------------------
+# Task: check_indexing_queue
+# ---------------------------------------------------------------------------
+@app.task(bind=True, queue="execution", max_retries=2, name="taskq.tasks.check_indexing_queue")
+def check_indexing_queue(self) -> dict:
+    """Submit pending URLs from indexing_queue table to Google + Bing."""
+    log.info("check_indexing_queue.start  task_id=%s", self.request.id)
+    try:
+        from data.db import get_db
+        from execution.indexing import submit_url
+
+        db = get_db()
+        pending = db.get_pending_indexing(limit=20)
+        submitted = []
+        failed = []
+
+        for row in pending:
+            url = row.get("url", "")
+            if not url:
+                continue
+            result = _run_async(submit_url(url))
+            if result.any_success:
+                submitted.append(url)
+                db.mark_indexed(url)
+            else:
+                failed.append(url)
+
+        result = {
+            "status": "success",
+            "pending_found": len(pending),
+            "submitted": len(submitted),
+            "failed": len(failed),
+            "timestamp": _utc_now(),
+            "task_id": self.request.id,
+        }
+        _save_result(self.request.id, result)
+        log.info("check_indexing_queue.done  task_id=%s  submitted=%d  failed=%d",
+                 self.request.id, len(submitted), len(failed))
+        return result
+
+    except Exception as exc:
+        log.exception("check_indexing_queue.error  task_id=%s  exc=%s", self.request.id, exc)
+        raise self.retry(exc=exc, countdown=2 ** self.request.retries * 60)
+
+
+# ---------------------------------------------------------------------------
+# Task: run_system_health
+# ---------------------------------------------------------------------------
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_system_health")
+def run_system_health(self) -> dict:
+    """Run system health checks and fire alerts for critical issues."""
+    log.info("run_system_health.start  task_id=%s", self.request.id)
+    try:
+        from monitoring.health import SystemHealthMonitor
+        monitor = SystemHealthMonitor()
+        report = _run_async(monitor.run_checks())
+        result = {
+            "status": "success",
+            "overall_status": report.overall_status,
+            "claude_cli_ok": report.claude_cli_ok,
+            "redis_ok": report.redis_ok,
+            "queue_depth": report.queue_depth,
+            "disk_usage_pct": report.disk_usage_pct,
+            "dead_letter_count": report.dead_letter_count,
+            "alerts_fired": report.alerts_fired,
+            "timestamp": _utc_now(),
+            "task_id": self.request.id,
+        }
+        _save_result(self.request.id, result)
+        log.info("run_system_health.done  task_id=%s  status=%s  alerts=%d",
+                 self.request.id, report.overall_status, len(report.alerts_fired))
+        return result
+
+    except Exception as exc:
+        log.exception("run_system_health.error  task_id=%s  exc=%s", self.request.id, exc)
+        raise self.retry(exc=exc, countdown=60)
+
+
+# ---------------------------------------------------------------------------
+# Task: run_orphan_detection
+# ---------------------------------------------------------------------------
+@app.task(bind=True, queue="analysis", max_retries=1, name="taskq.tasks.run_orphan_detection")
+def run_orphan_detection(self, business_id: str = "") -> dict:
+    """Detect orphaned pages and pages missing pillar links; queue fix tasks."""
+    log.info("run_orphan_detection.start  task_id=%s  business_id=%s", self.request.id, business_id)
+    try:
+        from core.linking.semantic_linker import SemanticLinker, PageNode
+        from data.db import get_db
+        import json
+        from pathlib import Path
+
+        db = get_db()
+        # Get published URLs from DB
+        try:
+            rows = db._conn.execute(
+                "SELECT url, title, content_snippet, intent FROM published_urls WHERE business_id=? LIMIT 200",
+                (business_id,)
+            ).fetchall()
+        except Exception:
+            rows = []
+
+        pages = [
+            PageNode(
+                url=r[0], title=r[1] or "",
+                content=r[2] or "", intent=r[3] or "informational"
+            )
+            for r in rows
+        ]
+
+        if not pages:
+            return {"status": "skipped", "reason": "no published pages found", "task_id": self.request.id}
+
+        linker = SemanticLinker()
+        links = linker.build_link_graph(pages)
+        orphans = linker.detect_orphans(pages, links)
+        pillar_gaps = linker.enforce_pillar_links(pages, links)
+
+        result = {
+            "status": "success",
+            "business_id": business_id,
+            "total_pages": len(pages),
+            "orphaned_pages": [o.url for o in orphans],
+            "orphan_count": len(orphans),
+            "pillar_gaps": len(pillar_gaps),
+            "timestamp": _utc_now(),
+            "task_id": self.request.id,
+        }
+        _save_result(self.request.id, result)
+        log.info("run_orphan_detection.done  task_id=%s  orphans=%d  gaps=%d",
+                 self.request.id, len(orphans), len(pillar_gaps))
+        return result
+
+    except Exception as exc:
+        log.exception("run_orphan_detection.error  task_id=%s  exc=%s", self.request.id, exc)
+        raise self.retry(exc=exc, countdown=60)
+
+
 @app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.send_daily_summary")
 def send_daily_summary(self) -> dict:
     """Daily execution summary alert to ALERT_WEBHOOK_URL."""

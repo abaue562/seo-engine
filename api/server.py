@@ -27,6 +27,14 @@ from models.task import SEOTask, TaskBatch
 logging.basicConfig(level=getattr(logging, LOG_LEVEL.upper(), logging.INFO))
 log = logging.getLogger(__name__)
 
+# Attach lead capture router (CRM + contact form)
+try:
+    from conversion.crm import lead_router
+    if lead_router is not None:
+        from fastapi import APIRouter  # noqa — already imported below
+except ImportError:
+    lead_router = None
+
 brain: SEOBrain | None = None
 orchestrator: AgentOrchestrator | None = None
 db: Database | None = None
@@ -61,6 +69,10 @@ app = FastAPI(
     description="Autonomous SEO domination system — analyze, decide, execute, learn, predict, signal, dominate",
     lifespan=lifespan,
 )
+
+# Mount lead capture router at /conversion
+if lead_router is not None:
+    app.include_router(lead_router, prefix="/conversion")
 
 app.add_middleware(
     CORSMiddleware,
@@ -1666,6 +1678,200 @@ async def publisher_status():
         "connectors_registered": list(pub.connectors.keys()),
         "count": len(pub.connectors),
     }
+
+
+# ── Programmatic SEO ─────────────────────────────────────────────────────────
+
+class ProgrammaticRequest(BaseModel):
+    business_id: str
+    services: list[str] = []
+    pages_per_day: int = 10
+
+
+@app.post("/programmatic/generate")
+async def programmatic_generate(req: ProgrammaticRequest):
+    """Generate programmatic SEO page matrix (location × service × modifier)."""
+    from core.programmatic.generator import ProgrammaticGenerator
+    import json
+    from pathlib import Path
+
+    biz_file = Path("data/storage/businesses.json")
+    business = {}
+    if biz_file.exists():
+        all_biz = json.loads(biz_file.read_text())
+        business = next((b for b in all_biz if b.get("id") == req.business_id), {})
+
+    gen = ProgrammaticGenerator()
+    services = req.services or business.get("services", ["service"])
+    matrix = gen.generate_matrix(services=services)
+    calendar = gen.to_publish_calendar(matrix, pages_per_day=req.pages_per_day)
+
+    return {
+        "business_id": req.business_id,
+        "matrix_size": len(matrix),
+        "calendar_pages": len(calendar),
+        "preview": calendar[:5],
+    }
+
+
+@app.post("/programmatic/queue")
+async def programmatic_queue(req: ProgrammaticRequest):
+    """Queue programmatic page batch for today via Celery."""
+    from taskq.tasks import run_programmatic_batch
+    task = run_programmatic_batch.apply_async(
+        args=[req.business_id, req.pages_per_day],
+    )
+    return {"task_id": task.id, "status": "queued", "business_id": req.business_id}
+
+
+# ── Deep health check ─────────────────────────────────────────────────────────
+
+@app.get("/health/deep")
+async def deep_health():
+    """Full system health check — Claude CLI, Redis, queues, disk, dead-letter."""
+    from monitoring.health import SystemHealthMonitor
+    monitor = SystemHealthMonitor()
+    report = await monitor.run_checks()
+    return report.to_dict()
+
+
+# ── Indexing management ───────────────────────────────────────────────────────
+
+class IndexUrlRequest(BaseModel):
+    url: str
+
+
+@app.post("/indexing/submit")
+async def indexing_submit(req: IndexUrlRequest):
+    """Submit a single URL to Google Indexing API + Bing IndexNow + GSC."""
+    from execution.indexing import submit_url
+    result = await submit_url(req.url)
+    return {
+        "url": result.url,
+        "google_api": result.google_api,
+        "google_sitemap": result.google_sitemap_ping,
+        "gsc_request": result.gsc_request,
+        "bing_indexnow": result.bing_indexnow,
+        "any_success": result.any_success,
+        "errors": result.errors,
+    }
+
+
+@app.post("/indexing/verify")
+async def indexing_verify(req: IndexUrlRequest):
+    """Check if URL is indexed in Google via GSC URL Inspection API."""
+    from execution.indexing import IndexingSystem
+    system = IndexingSystem()
+    indexed = await system.verify_indexed(req.url)
+    return {"url": req.url, "indexed": indexed}
+
+
+# ── Wikidata entity pipeline ──────────────────────────────────────────────────
+
+@app.post("/entity/wikidata/build")
+async def wikidata_build(business: BusinessContext):
+    """Run full Wikidata entity creation pipeline for a business."""
+    from authority.wikidata import run_entity_pipeline
+    biz_dict = business.model_dump()
+    result = await run_entity_pipeline(biz_dict)
+    return result
+
+
+@app.post("/entity/wikidata/quickstatements")
+async def wikidata_quickstatements(business: BusinessContext):
+    """Generate Wikidata QuickStatements for manual import."""
+    from authority.wikidata import WikidataBuilder
+    builder = WikidataBuilder()
+    entity = builder.build_entity(business.model_dump())
+    qs = builder.to_quickstatements(entity)
+    return {
+        "label": entity.label,
+        "description": entity.description,
+        "quickstatements": qs,
+        "lines": len(qs.splitlines()),
+    }
+
+
+# ── HARO management ───────────────────────────────────────────────────────────
+
+@app.post("/backlinks/haro/trigger")
+async def haro_trigger(business_id: str = "default"):
+    """Manually trigger HARO check and response sending."""
+    from taskq.tasks import run_haro_check
+    task = run_haro_check.apply_async(args=[business_id])
+    return {"task_id": task.id, "status": "queued", "business_id": business_id}
+
+
+@app.post("/backlinks/reclamation/trigger")
+async def reclamation_trigger(business_id: str = "default"):
+    """Manually trigger link reclamation campaign."""
+    from taskq.tasks import run_link_reclamation
+    task = run_link_reclamation.apply_async(args=[business_id])
+    return {"task_id": task.id, "status": "queued", "business_id": business_id}
+
+
+# ── Content Gate ──────────────────────────────────────────────────────────────
+
+class ContentGateRequest(BaseModel):
+    content_html: str
+    keyword: str
+    intent: str = "informational"
+    title: str = ""
+    meta_description: str = ""
+    humanise_if_needed: bool = False
+
+
+@app.post("/quality/gate")
+async def content_gate(req: ContentGateRequest):
+    """Run the full content quality gate (word count, AI score, direct answer, FAQ, headers)."""
+    from execution.validators.content_gate import ContentGate
+    try:
+        from config.settings import ORIGINALITY_API_KEY
+    except ImportError:
+        ORIGINALITY_API_KEY = ""
+
+    gate = ContentGate(originality_api_key=ORIGINALITY_API_KEY)
+
+    if req.humanise_if_needed:
+        result = await gate.check_and_humanise(
+            req.content_html, req.keyword,
+            intent=req.intent, title=req.title,
+            meta_description=req.meta_description,
+        )
+    else:
+        result = await gate.check(
+            req.content_html, req.keyword,
+            intent=req.intent, title=req.title,
+            meta_description=req.meta_description,
+        )
+
+    return {
+        "passed": result.passed,
+        "blocking_failures": result.blocking_failures,
+        "warnings": result.warnings,
+        "scores": result.scores,
+        "humanised": result.humanised_html is not None,
+    }
+
+
+# ── Canonical registry ────────────────────────────────────────────────────────
+
+class CanonicalRequest(BaseModel):
+    url: str
+    content: str = ""
+    business_id: str = "default"
+
+
+@app.post("/canonical/register")
+async def canonical_register(req: CanonicalRequest):
+    """Register a URL in the canonical registry and check for duplicates."""
+    from execution.canonical import CanonicalRegistry, SimHashDuplicate
+    registry = CanonicalRegistry()
+    try:
+        registry.register(req.url, req.content, req.business_id)
+        return {"registered": True, "url": req.url, "duplicate": False}
+    except SimHashDuplicate as e:
+        return {"registered": False, "url": req.url, "duplicate": True, "original_url": str(e).split(": ")[-1]}
 
 
 # ---- Run ----

@@ -104,6 +104,13 @@ app.conf.update(
         "taskq.tasks.run_citation_monitor":  {"queue": "monitoring"},
         "taskq.tasks.run_cwv_audit":         {"queue": "monitoring"},
         "taskq.tasks.send_daily_summary":    {"queue": "monitoring"},
+        # New Phase 2-14 tasks
+        "taskq.tasks.run_programmatic_batch": {"queue": "execution"},
+        "taskq.tasks.run_haro_check":         {"queue": "execution"},
+        "taskq.tasks.run_link_reclamation":   {"queue": "execution"},
+        "taskq.tasks.check_indexing_queue":   {"queue": "execution"},
+        "taskq.tasks.run_system_health":      {"queue": "monitoring"},
+        "taskq.tasks.run_orphan_detection":   {"queue": "analysis"},
     },
 
     # Beat schedule — all times in UTC
@@ -149,6 +156,32 @@ app.conf.update(
             "task": "taskq.tasks.send_daily_summary",
             "schedule": 86400,          # 24 h — daily alert digest
             "options": {"queue": "monitoring"},
+        },
+        # ── Phase 2-14 new schedules ───────────────────────────────────────
+        "run-haro-check": {
+            "task": "taskq.tasks.run_haro_check",
+            "schedule": 28800,          # 8 h — matches HARO digest cadence
+            "options": {"queue": "execution"},
+        },
+        "run-system-health": {
+            "task": "taskq.tasks.run_system_health",
+            "schedule": 900,            # 15 min — critical infrastructure check
+            "options": {"queue": "monitoring"},
+        },
+        "check-indexing-queue": {
+            "task": "taskq.tasks.check_indexing_queue",
+            "schedule": 3600,           # 1 h — submit pending URLs to Google+Bing
+            "options": {"queue": "execution"},
+        },
+        "run-link-reclamation": {
+            "task": "taskq.tasks.run_link_reclamation",
+            "schedule": 604800,         # 7 days — weekly link reclamation outreach
+            "options": {"queue": "execution"},
+        },
+        "run-orphan-detection": {
+            "task": "taskq.tasks.run_orphan_detection",
+            "schedule": 259200,         # 3 days — internal link health check
+            "options": {"queue": "analysis"},
         },
     },
 )

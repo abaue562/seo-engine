@@ -108,3 +108,31 @@ GA4_MEASUREMENT_ID = os.getenv("GA4_MEASUREMENT_ID", "") # G-XXXXXXXXXX format
 # Default phone/email injected into CTAs if not set on individual business
 DEFAULT_PHONE = os.getenv("DEFAULT_PHONE", "")
 DEFAULT_EMAIL = os.getenv("DEFAULT_EMAIL", "")
+
+# ── SQLite data store ─────────────────────────────────────────────────────────
+DB_PATH = os.getenv("DB_PATH", "data/storage/seo_engine.db")
+
+# ── SMTP (outbound email — HARO responses, lead notifications, outreach) ──────
+SMTP_HOST = os.getenv("SMTP_HOST", "")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+SMTP_USER = os.getenv("SMTP_USER", "")
+SMTP_PASS = os.getenv("SMTP_PASS", "")
+
+# ── IMAP (inbound email — HARO digest polling) ────────────────────────────────
+IMAP_HOST = os.getenv("IMAP_HOST", "")
+IMAP_USER = os.getenv("IMAP_USER", "")
+IMAP_PASS = os.getenv("IMAP_PASS", "")
+
+# ── SendGrid (alternative to SMTP for transactional email) ───────────────────
+SENDGRID_API_KEY = os.getenv("SENDGRID_API_KEY", "")
+
+# ── CRM integrations ──────────────────────────────────────────────────────────
+HUBSPOT_API_KEY      = os.getenv("HUBSPOT_API_KEY", "")
+PIPEDRIVE_API_TOKEN  = os.getenv("PIPEDRIVE_API_TOKEN", "")
+
+# ── Proxy list (comma-separated host:port for rotation) ──────────────────────
+PROXY_LIST = [p.strip() for p in os.getenv("PROXY_LIST", "").split(",") if p.strip()]
+
+# ── Wikidata ──────────────────────────────────────────────────────────────────
+WIKIDATA_USERNAME = os.getenv("WIKIDATA_USERNAME", "")
+WIKIDATA_PASSWORD = os.getenv("WIKIDATA_PASSWORD", "")
