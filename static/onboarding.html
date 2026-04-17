@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Setup Your SEO — GetHubed</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#0d1117;color:#c9d1d9;min-height:100vh}
+.topbar{background:#161b22;border-bottom:1px solid #30363d;padding:14px 28px;display:flex;align-items:center;gap:12px}
+.topbar .logo{font-size:18px;font-weight:800;color:#f0f6fc}.topbar .logo span{color:#58a6ff}
+.hero{padding:56px 24px 40px;text-align:center;background:linear-gradient(180deg,#0d1117,#161b22)}
+.hero .badge{display:inline-block;background:rgba(31,111,235,.15);border:1px solid rgba(88,166,255,.2);color:#58a6ff;font-size:12px;font-weight:700;padding:4px 14px;border-radius:20px;letter-spacing:.05em;text-transform:uppercase;margin-bottom:18px}
+.hero h1{font-size:40px;font-weight:800;color:#f0f6fc;line-height:1.2;max-width:600px;margin:0 auto 14px}
+.hero h1 em{font-style:normal;color:#58a6ff}
+.hero p{font-size:16px;color:#8b949e;max-width:480px;margin:0 auto 32px;line-height:1.6}
+.steps-bar{display:flex;justify-content:center;gap:0;max-width:480px;margin:0 auto 48px;position:relative}
+.steps-bar::before{content:'';position:absolute;top:18px;left:10%;right:10%;height:2px;background:#21262d;z-index:0}
+.step-dot{display:flex;flex-direction:column;align-items:center;gap:8px;flex:1;position:relative;z-index:1;cursor:default}
+.step-dot .dot{width:36px;height:36px;border-radius:50%;background:#21262d;border:2px solid #30363d;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#8b949e;transition:all .3s}
+.step-dot.active .dot{background:#1f6feb;border-color:#1f6feb;color:#fff}
+.step-dot.done .dot{background:#238636;border-color:#238636;color:#fff}
+.step-dot .label{font-size:11px;color:#8b949e;font-weight:500;text-align:center}
+.step-dot.active .label{color:#58a6ff}
+.step-dot.done .label{color:#3fb950}
+
+.wizard{max-width:620px;margin:0 auto;padding:0 24px 80px}
+.step-panel{display:none}.step-panel.active{display:block}
+
+.card{background:#161b22;border:1px solid #30363d;border-radius:16px;padding:36px}
+.card h2{font-size:22px;font-weight:700;color:#f0f6fc;margin-bottom:6px}
+.card .sub{font-size:14px;color:#8b949e;margin-bottom:28px;line-height:1.5}
+.form-group{margin-bottom:18px}
+.form-group label{display:block;font-size:12px;font-weight:600;color:#8b949e;text-transform:uppercase;letter-spacing:.4px;margin-bottom:7px}
+.form-group label span{color:#f85149}
+.form-group input,.form-group select,.form-group textarea{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:12px 14px;color:#c9d1d9;font-size:14px;font-family:'Inter',sans-serif;outline:none;transition:border .2s}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:#1f6feb;box-shadow:0 0 0 3px rgba(31,111,235,.1)}
+.form-group textarea{resize:vertical;min-height:80px}
+.form-group select option{background:#0d1117}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.form-hint{font-size:11px;color:#6e7681;margin-top:5px}
+.tags-input{display:flex;flex-wrap:wrap;gap:6px;background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:8px 10px;min-height:48px;cursor:text}
+.tags-input:focus-within{border-color:#1f6feb;box-shadow:0 0 0 3px rgba(31,111,235,.1)}
+.tags-input input{border:none;outline:none;background:transparent;color:#c9d1d9;font-size:14px;font-family:'Inter',sans-serif;flex:1;min-width:120px;padding:4px}
+.tag{display:inline-flex;align-items:center;gap:6px;background:#21262d;border:1px solid #30363d;border-radius:20px;padding:3px 10px;font-size:12px;color:#c9d1d9}
+.tag button{background:none;border:none;color:#8b949e;cursor:pointer;padding:0;font-size:14px;line-height:1}
+.btn{padding:12px 24px;border-radius:8px;border:none;cursor:pointer;font-size:14px;font-weight:600;transition:all .2s;font-family:'Inter',sans-serif}
+.btn-primary{background:#1f6feb;color:#fff;width:100%;margin-top:8px;font-size:15px;padding:14px}
+.btn-primary:hover{background:#388bfd}
+.btn-primary:disabled{background:#21262d;color:#8b949e;cursor:not-allowed}
+.btn-back{background:transparent;border:1px solid #30363d;color:#c9d1d9;padding:10px 20px}
+.btn-back:hover{border-color:#8b949e}
+.nav-row{display:flex;align-items:center;justify-content:space-between;margin-top:16px}
+.err{background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.3);color:#f85149;padding:12px 16px;border-radius:8px;font-size:13px;margin-top:12px;display:none}
+
+/* Progress panel */
+.progress-wrap{text-align:center;padding:20px 0}
+.progress-icon{font-size:48px;margin-bottom:16px}
+.progress-title{font-size:20px;font-weight:700;color:#f0f6fc;margin-bottom:8px}
+.progress-sub{font-size:14px;color:#8b949e;margin-bottom:28px}
+.progress-bar-wrap{background:#21262d;border-radius:8px;overflow:hidden;height:8px;margin-bottom:24px}
+.progress-bar{height:100%;background:linear-gradient(90deg,#1f6feb,#58a6ff);border-radius:8px;transition:width .5s ease}
+.step-list{text-align:left;border:1px solid #30363d;border-radius:10px;overflow:hidden}
+.step-item{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #30363d;font-size:13px}
+.step-item:last-child{border:none}
+.step-item .si-icon{width:22px;height:22px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;flex-shrink:0}
+.step-item.pending .si-icon{background:#21262d;color:#8b949e}
+.step-item.running .si-icon{background:rgba(31,111,235,.2);color:#58a6ff;animation:pulse 1.5s infinite}
+.step-item.done .si-icon{background:rgba(35,134,54,.2);color:#3fb950}
+.step-item.failed .si-icon{background:rgba(248,81,73,.1);color:#f85149}
+.step-item .si-name{flex:1;color:#c9d1d9}
+.step-item .si-detail{font-size:11px;color:#8b949e}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+
+/* Success */
+.success-wrap{text-align:center;padding:20px 0}
+.success-icon{width:72px;height:72px;background:rgba(35,134,54,.15);border:2px solid rgba(63,185,80,.3);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 20px;font-size:32px}
+.success-title{font-size:24px;font-weight:700;color:#f0f6fc;margin-bottom:8px}
+.success-sub{font-size:14px;color:#8b949e;margin-bottom:28px;line-height:1.6}
+.bid-box{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:12px 16px;font-family:monospace;font-size:13px;color:#58a6ff;margin-bottom:24px;word-break:break-all}
+.metrics-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:24px;text-align:left}
+.metric-card{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:14px}
+.metric-card .mv{font-size:26px;font-weight:700;color:#f0f6fc}
+.metric-card .ml{font-size:11px;color:#8b949e;margin-top:2px}
+.btn-dashboard{display:block;background:linear-gradient(90deg,#1f6feb,#388bfd);color:#fff;font-weight:700;font-size:15px;padding:14px;border-radius:8px;text-align:center;text-decoration:none;margin-bottom:10px}
+.btn-creds{display:block;background:#21262d;border:1px solid #30363d;color:#c9d1d9;font-weight:600;font-size:14px;padding:12px;border-radius:8px;text-align:center;text-decoration:none}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="logo">Get<span>Hubed</span></div>
+</div>
+
+<div class="hero">
+  <div class="badge">Automated SEO Engine</div>
+  <h1>Set up your <em>AI-powered</em><br>SEO in minutes</h1>
+  <p>We automatically build your content, citations, backlinks, and conversion layer. No agencies, no guesswork.</p>
+</div>
+
+<div class="steps-bar" id="steps-bar">
+  <div class="step-dot active" id="sdot-1"><div class="dot">1</div><div class="label">Business</div></div>
+  <div class="step-dot" id="sdot-2"><div class="dot">2</div><div class="label">Services</div></div>
+  <div class="step-dot" id="sdot-3"><div class="dot">3</div><div class="label">Setup</div></div>
+  <div class="step-dot" id="sdot-4"><div class="dot">4</div><div class="label">Done</div></div>
+</div>
+
+<div class="wizard">
+
+  <!-- STEP 1: Business Info -->
+  <div class="step-panel active" id="step-1">
+    <div class="card">
+      <h2>Tell us about your business</h2>
+      <p class="sub">This drives everything — content, pricing data, local citations, and lead forms.</p>
+      <div class="form-group">
+        <label>Business Name <span>*</span></label>
+        <input type="text" id="biz-name" placeholder="e.g. Blend Bright Lights" autocomplete="organization">
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Website Domain <span>*</span></label>
+          <input type="text" id="biz-domain" placeholder="blendbright.ca">
+        </div>
+        <div class="form-group">
+          <label>Phone Number</label>
+          <input type="tel" id="biz-phone" placeholder="(250) 555-0100">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>City <span>*</span></label>
+          <input type="text" id="biz-city" placeholder="Kelowna">
+        </div>
+        <div class="form-group">
+          <label>Province / State</label>
+          <input type="text" id="biz-province" placeholder="BC">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>Contact Email <span>*</span></label>
+        <input type="email" id="biz-email" placeholder="owner@yourbusiness.com">
+        <div class="form-hint">Receives lead notifications</div>
+      </div>
+      <div id="err-1" class="err"></div>
+      <button class="btn btn-primary" onclick="goStep2()">Continue →</button>
+    </div>
+  </div>
+
+  <!-- STEP 2: Services + Niche -->
+  <div class="step-panel" id="step-2">
+    <div class="card">
+      <h2>Your services &amp; market</h2>
+      <p class="sub">We'll generate pricing data, FAQ content, and local citations specific to these services.</p>
+      <div class="form-group">
+        <label>Industry / Niche <span>*</span></label>
+        <select id="biz-niche">
+          <option value="">Select your industry...</option>
+          <option value="electrical contractor">Electrical Contractor</option>
+          <option value="plumbing">Plumbing</option>
+          <option value="hvac">HVAC</option>
+          <option value="roofing">Roofing</option>
+          <option value="landscaping">Landscaping</option>
+          <option value="painting">Painting</option>
+          <option value="flooring">Flooring</option>
+          <option value="cleaning services">Cleaning Services</option>
+          <option value="moving company">Moving Company</option>
+          <option value="home renovation">Home Renovation</option>
+          <option value="pest control">Pest Control</option>
+          <option value="window & door">Window &amp; Door</option>
+          <option value="solar installation">Solar Installation</option>
+          <option value="other home services">Other Home Services</option>
+          <option value="other">Other</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Services Offered <span>*</span></label>
+        <div class="tags-input" id="services-wrap" onclick="document.getElementById('svc-input').focus()">
+          <input type="text" id="svc-input" placeholder="Type a service and press Enter…" onkeydown="addService(event)">
+        </div>
+        <div class="form-hint">e.g. LED lighting installation, panel upgrades, EV charger install</div>
+      </div>
+      <div class="form-group">
+        <label>What makes you different?</label>
+        <textarea id="biz-differentiator" placeholder="e.g. 15 years experience, same-day service, certified Energy Star partner..." rows="3"></textarea>
+      </div>
+      <div id="err-2" class="err"></div>
+      <div class="nav-row">
+        <button class="btn btn-back" onclick="goStep(1)">← Back</button>
+        <button class="btn btn-primary" style="width:auto;padding:12px 28px" onclick="goStep3()">Start Setup →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 3: Running -->
+  <div class="step-panel" id="step-3">
+    <div class="card">
+      <div class="progress-wrap">
+        <div class="progress-icon" id="prog-icon">⚙️</div>
+        <div class="progress-title" id="prog-title">Setting up your SEO engine…</div>
+        <div class="progress-sub" id="prog-sub">This takes 30–60 seconds. Don't close this window.</div>
+        <div class="progress-bar-wrap"><div class="progress-bar" id="prog-bar" style="width:5%"></div></div>
+        <div class="step-list" id="step-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 4: Done -->
+  <div class="step-panel" id="step-4">
+    <div class="card">
+      <div class="success-wrap">
+        <div class="success-icon">✓</div>
+        <div class="success-title">Your SEO engine is live!</div>
+        <div class="success-sub">We've set up your content factory, citation layer, conversion tracking, and parasite SEO pages. Your first content will appear within 24 hours.</div>
+        <div class="bid-box" id="success-bid"></div>
+        <div class="metrics-grid" id="success-metrics"></div>
+        <a href="/dashboard" class="btn-dashboard" id="dash-link">Go to Dashboard →</a>
+        <a href="/credentials" class="btn-creds">⚙️ Configure Platform Credentials</a>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const services = [];
+let businessId = '';
+const ONBOARDING_STEPS = [
+  {id:'facts',       name:'Generate local pricing data',     icon:'📊'},
+  {id:'author',      name:'Create author profile',           icon:'✍️'},
+  {id:'tracking',    name:'Setup call tracking',             icon:'📞'},
+  {id:'cta',         name:'Generate CTA variants',           icon:'🎯'},
+  {id:'entity',      name:'Build brand entity / KG',         icon:'🔗'},
+  {id:'citation',    name:'Generate citation pages',         icon:'📄'},
+  {id:'parasite',    name:'Generate parasite content',       icon:'🌐'},
+  {id:'backlinks',   name:'Find backlink prospects',         icon:'🔍'},
+];
+
+function setStep(n) {
+  [1,2,3,4].forEach(i => {
+    document.getElementById('step-'+i).classList.toggle('active', i===n);
+    const dot = document.getElementById('sdot-'+i);
+    dot.classList.toggle('active', i===n);
+    dot.classList.toggle('done', i<n);
+    if(i<n) dot.querySelector('.dot').textContent='✓';
+    else if(i>n) dot.querySelector('.dot').textContent=i;
+  });
+}
+function goStep(n){setStep(n);}
+function showErr(id, msg){ const e=document.getElementById(id); e.textContent=msg; e.style.display='block'; }
+function hideErr(id){ document.getElementById(id).style.display='none'; }
+
+function addService(e) {
+  if(e.key !== 'Enter' && e.key !== ',') return;
+  e.preventDefault();
+  const val = e.target.value.trim();
+  if(!val || services.includes(val)) { e.target.value=''; return; }
+  services.push(val);
+  const tag = document.createElement('div');
+  tag.className = 'tag';
+  tag.innerHTML = `${val}<button onclick="removeService('${val}',this)">×</button>`;
+  document.getElementById('services-wrap').insertBefore(tag, e.target);
+  e.target.value = '';
+}
+function removeService(val, btn) {
+  services.splice(services.indexOf(val), 1);
+  btn.parentElement.remove();
+}
+
+function goStep2() {
+  hideErr('err-1');
+  const name = document.getElementById('biz-name').value.trim();
+  const domain = document.getElementById('biz-domain').value.trim();
+  const city = document.getElementById('biz-city').value.trim();
+  const email = document.getElementById('biz-email').value.trim();
+  if(!name || !domain || !city || !email) { showErr('err-1','Please fill in all required fields.'); return; }
+  if(!email.includes('@')) { showErr('err-1','Please enter a valid email address.'); return; }
+  setStep(2);
+}
+
+function goStep3() {
+  hideErr('err-2');
+  const niche = document.getElementById('biz-niche').value;
+  if(!niche) { showErr('err-2','Please select your industry.'); return; }
+  if(services.length === 0) { showErr('err-2','Please add at least one service.'); return; }
+  setStep(3);
+  runOnboarding();
+}
+
+function renderStepList(stepStates) {
+  const html = ONBOARDING_STEPS.map(s => {
+    const state = stepStates[s.id] || 'pending';
+    const icons = {pending:'·', running:'⟳', done:'✓', failed:'✗'};
+    return `<div class="step-item ${state}">
+      <div class="si-icon">${icons[state]||'·'}</div>
+      <div class="si-name">${s.icon} ${s.name}</div>
+      <div class="si-detail">${state==='done'?'Complete':state==='running'?'Running…':state==='failed'?'Failed':''}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('step-list').innerHTML = html;
+}
+
+async function runOnboarding() {
+  const profile = {
+    name: document.getElementById('biz-name').value.trim(),
+    domain: document.getElementById('biz-domain').value.trim().replace(/^https?:\/\//,''),
+    city: document.getElementById('biz-city').value.trim(),
+    province: document.getElementById('biz-province').value.trim(),
+    phone: document.getElementById('biz-phone').value.trim(),
+    contact_email: document.getElementById('biz-email').value.trim(),
+    notify_email: document.getElementById('biz-email').value.trim(),
+    niche: document.getElementById('biz-niche').value,
+    services: [...services],
+    differentiator: document.getElementById('biz-differentiator').value.trim(),
+  };
+  profile.location = profile.city + (profile.province ? ' ' + profile.province : '');
+
+  const stepStates = {};
+  ONBOARDING_STEPS.forEach(s => stepStates[s.id] = 'pending');
+  renderStepList(stepStates);
+
+  function setProgress(pct, title, sub) {
+    document.getElementById('prog-bar').style.width = pct + '%';
+    if(title) document.getElementById('prog-title').textContent = title;
+    if(sub) document.getElementById('prog-sub').textContent = sub;
+  }
+
+  try {
+    setProgress(10, 'Creating your account…', 'Saving business profile');
+    const res = await fetch('/onboarding/start', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(profile)
+    });
+    const data = await res.json();
+    if(!res.ok) throw new Error(data.detail || 'Server error');
+    const jobId = data.job_id;
+    businessId = data.business_id;
+
+    // Poll for progress
+    let done = false;
+    let attempts = 0;
+    while(!done && attempts < 120) {
+      await new Promise(r => setTimeout(r, 2000));
+      attempts++;
+      try {
+        const sr = await fetch(`/onboarding/status/${jobId}`);
+        const status = await sr.json();
+        const pct = Math.round((status.steps_done / Math.max(status.steps_total, 1)) * 85) + 10;
+        setProgress(pct, status.current_step_label || 'Running setup…', `Step ${status.steps_done} of ${status.steps_total}`);
+        // Update step states
+        (status.steps_completed || []).forEach(s => stepStates[s] = 'done');
+        if(status.current_step) stepStates[status.current_step] = 'running';
+        renderStepList(stepStates);
+        if(status.status === 'completed' || status.status === 'failed') { done = true; }
+      } catch(e) {}
+    }
+
+    // Final update
+    ONBOARDING_STEPS.forEach(s => { if(stepStates[s.id]==='running') stepStates[s.id]='done'; });
+    renderStepList(stepStates);
+    setProgress(100, 'Setup complete!', 'Everything is running');
+    document.getElementById('prog-icon').textContent = '🚀';
+
+    setTimeout(() => showSuccess(businessId, data), 1200);
+  } catch(e) {
+    document.getElementById('prog-icon').textContent = '❌';
+    document.getElementById('prog-title').textContent = 'Setup failed';
+    document.getElementById('prog-sub').textContent = e.message;
+  }
+}
+
+function showSuccess(bid, data) {
+  setStep(4);
+  document.getElementById('success-bid').textContent = 'Business ID: ' + bid;
+  document.getElementById('dash-link').href = '/dashboard?bid=' + bid;
+  const metrics = [
+    {v: data.facts_generated || '—', l: 'Pricing Facts'},
+    {v: data.citation_pages || '—', l: 'Citation Pages'},
+    {v: data.parasite_pages || '—', l: 'Parasite Pages'},
+  ];
+  document.getElementById('success-metrics').innerHTML = metrics.map(m =>
+    `<div class="metric-card"><div class="mv">${m.v}</div><div class="ml">${m.l}</div></div>`
+  ).join('');
+}
+</script>
+</body>
+</html>

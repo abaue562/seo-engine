@@ -2175,3 +2175,8 @@ async def signup_page():
     _p = _os.path.join(_static_dir, 'signup.html')
     with open(_p, encoding='utf-8') as _f:
         return _f.read()
+
+from api.credential_routes import router as credential_router
+from api.onboarding_routes import router as onboarding_router
+app.include_router(credential_router)
+app.include_router(onboarding_router)

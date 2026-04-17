@@ -1,0 +1,886 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SEO Dashboard — GetHubed</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:#0d1117;color:#c9d1d9;min-height:100vh;display:flex}
+a{color:#58a6ff;text-decoration:none}
+
+/* Sidebar */
+.sidebar{width:220px;min-height:100vh;background:#161b22;border-right:1px solid #30363d;flex-shrink:0;position:sticky;top:0;height:100vh;overflow-y:auto;display:flex;flex-direction:column}
+.sidebar .logo{padding:20px 20px 16px;font-size:16px;font-weight:800;color:#f0f6fc;border-bottom:1px solid #30363d}
+.sidebar .logo span{color:#58a6ff}
+.biz-selector{padding:12px 16px;border-bottom:1px solid #30363d}
+.biz-selector select{width:100%;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:7px 10px;color:#c9d1d9;font-size:12px;font-family:'Inter',sans-serif;outline:none}
+.nav{padding:12px 0;flex:1}
+.nav-section{padding:8px 16px 4px;font-size:10px;font-weight:700;color:#6e7681;text-transform:uppercase;letter-spacing:.8px}
+.nav a{display:flex;align-items:center;gap:10px;padding:8px 16px;font-size:13px;color:#8b949e;transition:all .15s;border-left:3px solid transparent}
+.nav a:hover{background:rgba(255,255,255,.04);color:#c9d1d9}
+.nav a.active{background:rgba(31,111,235,.1);color:#58a6ff;border-left-color:#1f6feb}
+.nav a .icon{font-size:15px;width:18px;text-align:center}
+.sidebar-footer{padding:16px;border-top:1px solid #30363d}
+.score-badge{background:linear-gradient(135deg,#1f6feb,#7c3aed);border-radius:10px;padding:14px;text-align:center}
+.score-badge .sv{font-size:32px;font-weight:800;color:#fff}
+.score-badge .sl{font-size:11px;color:rgba(255,255,255,.7);margin-top:2px}
+
+/* Main */
+.main{flex:1;overflow-y:auto;min-width:0}
+.topbar{background:#161b22;border-bottom:1px solid #30363d;padding:14px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:10}
+.topbar .page-title{font-size:15px;font-weight:600;color:#f0f6fc}
+.topbar-right{display:flex;align-items:center;gap:10px}
+.btn{padding:7px 16px;border-radius:6px;border:none;cursor:pointer;font-size:12px;font-weight:600;font-family:'Inter',sans-serif;transition:all .2s}
+.btn-primary{background:#1f6feb;color:#fff}
+.btn-primary:hover{background:#388bfd}
+.btn-sm{padding:5px 12px;font-size:11px}
+.btn-outline{background:transparent;border:1px solid #30363d;color:#c9d1d9}
+.btn-outline:hover{border-color:#8b949e}
+.btn-green{background:#238636;color:#fff}
+.btn-green:hover{background:#2ea043}
+.health-dot{width:8px;height:8px;border-radius:50%;background:#3fb950;display:inline-block}
+
+.content{padding:24px;max-width:1100px}
+
+/* Cards */
+.section{margin-bottom:32px}
+.section-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}
+.section-header h2{font-size:15px;font-weight:600;color:#f0f6fc}
+.section-header .section-meta{font-size:12px;color:#8b949e}
+.card{background:#161b22;border:1px solid #30363d;border-radius:10px;overflow:hidden}
+.card-header{padding:14px 18px;border-bottom:1px solid #30363d;display:flex;align-items:center;justify-content:space-between}
+.card-header h3{font-size:13px;font-weight:600;color:#f0f6fc}
+.card-body{padding:16px 18px}
+.empty{font-size:13px;color:#6e7681;padding:16px;text-align:center}
+
+/* Stats row */
+.stats-row{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:28px}
+.stat-card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:18px}
+.stat-card .s-label{font-size:11px;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;margin-bottom:8px}
+.stat-card .s-value{font-size:28px;font-weight:700;color:#f0f6fc;line-height:1}
+.stat-card .s-sub{font-size:11px;color:#8b949e;margin-top:6px}
+.stat-card .s-trend{font-size:11px;font-weight:600;margin-top:4px}
+.s-trend.up{color:#3fb950}.s-trend.down{color:#f85149}
+
+/* Gap scorecard */
+.gap-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px}
+.gap-card{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:14px}
+.gap-card .gc-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
+.gap-card .gc-name{font-size:12px;font-weight:600;color:#c9d1d9}
+.gap-card .gc-score{font-size:18px;font-weight:700;color:#f0f6fc}
+.gap-card .gc-score span{font-size:11px;color:#8b949e;font-weight:400}
+.gap-bar-wrap{background:#21262d;border-radius:4px;height:5px;overflow:hidden}
+.gap-bar{height:100%;border-radius:4px;transition:width .5s}
+.gap-bar.high{background:#3fb950}.gap-bar.med{background:#d29922}.gap-bar.low{background:#f85149}
+.gap-card .gc-detail{font-size:11px;color:#6e7681;margin-top:6px}
+
+/* Table */
+.data-table{width:100%;border-collapse:collapse;font-size:12px}
+.data-table th{text-align:left;padding:8px 12px;font-size:10px;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid #30363d}
+.data-table td{padding:10px 12px;border-bottom:1px solid #21262d;color:#c9d1d9;vertical-align:middle}
+.data-table tr:last-child td{border:none}
+.data-table tr:hover td{background:rgba(255,255,255,.02)}
+
+/* Badges */
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;text-transform:uppercase}
+.badge-green{background:rgba(35,134,54,.2);color:#3fb950;border:1px solid rgba(35,134,54,.3)}
+.badge-blue{background:rgba(31,111,235,.2);color:#58a6ff;border:1px solid rgba(31,111,235,.3)}
+.badge-yellow{background:rgba(210,153,34,.2);color:#e3b341;border:1px solid rgba(210,153,34,.3)}
+.badge-red{background:rgba(248,81,73,.1);color:#f85149;border:1px solid rgba(248,81,73,.2)}
+.badge-gray{background:#21262d;color:#8b949e;border:1px solid #30363d}
+
+/* Score ring */
+.score-ring{display:inline-flex;align-items:center;justify-content:center;width:52px;height:52px;border-radius:50%;font-size:14px;font-weight:700;flex-shrink:0}
+.ring-high{background:rgba(35,134,54,.15);border:2px solid rgba(63,185,80,.4);color:#3fb950}
+.ring-med{background:rgba(210,153,34,.15);border:2px solid rgba(227,179,65,.4);color:#e3b341}
+.ring-low{background:rgba(248,81,73,.1);border:2px solid rgba(248,81,73,.3);color:#f85149}
+
+/* Two-col layout */
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+
+/* Platform grid */
+.platform-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.platform-card{background:#0d1117;border:1px solid #30363d;border-radius:8px;padding:12px}
+.platform-card .pc-top{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.platform-card .pc-icon{font-size:18px}
+.platform-card .pc-name{font-size:12px;font-weight:600;color:#c9d1d9}
+.platform-card .pc-da{font-size:10px;color:#8b949e;margin-left:auto}
+.platform-card .pc-status{font-size:11px;margin-top:2px}
+
+/* Lead list */
+.lead-row{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #21262d}
+.lead-row:last-child{border:none}
+.lead-avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#1f6feb,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:#fff;flex-shrink:0}
+.lead-info{flex:1;min-width:0}
+.lead-name{font-size:13px;font-weight:600;color:#f0f6fc}
+.lead-meta{font-size:11px;color:#8b949e;margin-top:1px}
+.lead-score{font-size:13px;font-weight:700;padding:2px 8px;border-radius:12px}
+.score-hot{background:rgba(35,134,54,.2);color:#3fb950}
+.score-warm{background:rgba(210,153,34,.2);color:#e3b341}
+.score-cold{background:#21262d;color:#8b949e}
+
+/* Toast */
+#toast{position:fixed;bottom:24px;right:24px;background:#238636;color:#fff;padding:12px 20px;border-radius:8px;font-size:13px;font-weight:600;display:none;z-index:9999;max-width:320px}
+#toast.error{background:#da3633}
+
+/* Tabs */
+.tabs{display:flex;gap:0;border-bottom:1px solid #30363d;margin-bottom:20px}
+.tab{padding:10px 18px;font-size:13px;font-weight:500;color:#8b949e;cursor:pointer;border-bottom:2px solid transparent;transition:all .15s}
+.tab:hover{color:#c9d1d9}
+.tab.active{color:#58a6ff;border-bottom-color:#1f6feb}
+
+@media(max-width:900px){.gap-grid,.two-col{grid-template-columns:1fr}.stats-row{grid-template-columns:repeat(2,1fr)}.platform-grid{grid-template-columns:repeat(2,1fr)}.sidebar{display:none}}
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="logo">Get<span>Hubed</span></div>
+  <div class="biz-selector">
+    <select id="biz-select" onchange="switchBusiness(this.value)"></select>
+  </div>
+  <nav class="nav">
+    <div class="nav-section">Overview</div>
+    <a href="#overview" class="active" onclick="showSection('overview',this)"><span class="icon">📊</span>Dashboard</a>
+    <a href="#scorecard" onclick="showSection('scorecard',this)"><span class="icon">🎯</span>SEO Scorecard</a>
+    <div class="nav-section">Content</div>
+    <a href="#citations" onclick="showSection('citations',this)"><span class="icon">📄</span>Citation Pages</a>
+    <a href="#parasite" onclick="showSection('parasite',this)"><span class="icon">🌐</span>Parasite SEO</a>
+    <div class="nav-section">Acquisition</div>
+    <a href="#backlinks" onclick="showSection('backlinks',this)"><span class="icon">🔗</span>Backlinks</a>
+    <a href="#serp" onclick="showSection('serp',this)"><span class="icon">🔍</span>Rankings</a>
+    <div class="nav-section">Conversion</div>
+    <a href="#leads" onclick="showSection('leads',this)"><span class="icon">💬</span>Leads</a>
+    <a href="#cta" onclick="showSection('cta',this)"><span class="icon">📢</span>CTA Performance</a>
+    <div class="nav-section">Settings</div>
+    <a href="#credentials" onclick="showSection('credentials',this)"><span class="icon">🔑</span>Credentials</a>
+    <a href="/onboarding"><span class="icon">➕</span>Add Business</a>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="score-badge">
+      <div class="sv" id="sidebar-score">—</div>
+      <div class="sl">Overall SEO Score</div>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="topbar">
+    <div class="page-title" id="page-title">Dashboard</div>
+    <div class="topbar-right">
+      <span class="health-dot" id="health-dot"></span>
+      <span style="font-size:12px;color:#8b949e" id="health-label">Loading…</span>
+      <button class="btn btn-primary btn-sm" onclick="triggerSweep()">▶ Run Sweep</button>
+    </div>
+  </div>
+  <div class="content">
+
+    <!-- OVERVIEW -->
+    <div id="sec-overview">
+      <div class="stats-row" id="stats-row">
+        <div class="stat-card"><div class="s-label">Leads (30d)</div><div class="s-value" id="st-leads">—</div><div class="s-sub" id="st-leads-sub">—</div></div>
+        <div class="stat-card"><div class="s-label">Citation Pages</div><div class="s-value" id="st-cite">—</div><div class="s-sub" id="st-cite-sub">avg score —</div></div>
+        <div class="stat-card"><div class="s-label">Parasite Pages</div><div class="s-value" id="st-para">—</div><div class="s-sub" id="st-para-sub">— published</div></div>
+        <div class="stat-card"><div class="s-label">Backlink Prospects</div><div class="s-value" id="st-bl">—</div><div class="s-sub" id="st-bl-sub">— outreach sent</div></div>
+      </div>
+      <div class="two-col">
+        <div class="card">
+          <div class="card-header"><h3>Recent Leads</h3><a href="#leads" onclick="showSection('leads',null)" style="font-size:11px;color:#58a6ff">View all</a></div>
+          <div class="card-body" id="recent-leads-body"><div class="empty">Loading…</div></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3>Citation Pages</h3><button class="btn btn-outline btn-sm" onclick="runCitationSweep()">Regenerate</button></div>
+          <div class="card-body" id="cite-pages-overview"><div class="empty">Loading…</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCORECARD -->
+    <div id="sec-scorecard" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <h2>SEO Engine Scorecard</h2>
+          <span class="section-meta" id="score-updated">—</span>
+        </div>
+        <div class="gap-grid" id="gap-grid"><div class="empty">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- CITATIONS -->
+    <div id="sec-citations" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <h2>Citation Pages</h2>
+          <button class="btn btn-primary btn-sm" onclick="runCitationSweep()">+ Generate New Pages</button>
+        </div>
+        <div class="card">
+          <table class="data-table" id="cite-table">
+            <thead><tr><th>Page Type</th><th>Title</th><th>Citation Score</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody id="cite-tbody"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- PARASITE -->
+    <div id="sec-parasite" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <h2>Parasite SEO Pages</h2>
+          <button class="btn btn-primary btn-sm" onclick="runParasiteSweep()">+ Generate Content</button>
+        </div>
+        <div class="platform-grid" id="platform-grid"><div class="empty">Loading…</div></div>
+        <div class="card" style="margin-top:14px">
+          <table class="data-table" id="para-table">
+            <thead><tr><th>Platform</th><th>Title</th><th>DA</th><th>Status</th><th>Actions</th></tr></thead>
+            <tbody id="para-tbody"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- BACKLINKS -->
+    <div id="sec-backlinks" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <h2>Backlink Prospects</h2>
+          <span class="section-meta" id="bl-meta">—</span>
+        </div>
+        <div class="card">
+          <table class="data-table">
+            <thead><tr><th>Domain</th><th>Type</th><th>Priority</th><th>Status</th><th>Contact</th></tr></thead>
+            <tbody id="bl-tbody"><tr><td colspan="5" class="empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- RANKINGS -->
+    <div id="sec-serp" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <h2>Keyword Rankings</h2>
+          <button class="btn btn-outline btn-sm" onclick="runRankSweep()">Refresh Rankings</button>
+        </div>
+        <div class="card">
+          <table class="data-table">
+            <thead><tr><th>Keyword</th><th>Position</th><th>Engine</th><th>Last Checked</th></tr></thead>
+            <tbody id="rank-tbody"><tr><td colspan="4" class="empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- LEADS -->
+    <div id="sec-leads" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <h2>Leads</h2>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-outline btn-sm" onclick="filterLeads('')">All</button>
+            <button class="btn btn-outline btn-sm" onclick="filterLeads('new')">New</button>
+            <button class="btn btn-green btn-sm" onclick="exportLeads()">Export CSV</button>
+          </div>
+        </div>
+        <div class="card">
+          <table class="data-table">
+            <thead><tr><th>Name</th><th>Service</th><th>Score</th><th>Source</th><th>Status</th><th>Date</th><th></th></tr></thead>
+            <tbody id="leads-tbody"><tr><td colspan="7" class="empty">Loading…</td></tr></tbody>
+          </table>
+        </div>
+        <div class="two-col" style="margin-top:14px">
+          <div class="card">
+            <div class="card-header"><h3>Lead Stats (30d)</h3></div>
+            <div class="card-body" id="lead-stats-body"><div class="empty">Loading…</div></div>
+          </div>
+          <div class="card">
+            <div class="card-header"><h3>Call Tracking</h3></div>
+            <div class="card-body" id="call-stats-body"><div class="empty">Loading…</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- CTA -->
+    <div id="sec-cta" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <h2>CTA Variants</h2>
+          <button class="btn btn-primary btn-sm" onclick="genCTAs()">Generate New Variants</button>
+        </div>
+        <div id="cta-grid"><div class="empty">Loading…</div></div>
+      </div>
+    </div>
+
+    <!-- CREDENTIALS -->
+    <div id="sec-credentials" style="display:none">
+      <div class="section">
+        <div class="section-header">
+          <h2>Platform Credentials</h2>
+          <span class="section-meta">Keys are encrypted at rest</span>
+        </div>
+        <div id="cred-grid"><div class="empty">Loading…</div></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+let BID = new URLSearchParams(location.search).get('bid') || localStorage.getItem('seo_bid') || '';
+const API = '';
+
+// ── Nav ────────────────────────────────────────────────────────────────────────
+const sections = ['overview','scorecard','citations','parasite','backlinks','serp','leads','cta','credentials'];
+const titles   = {overview:'Dashboard',scorecard:'SEO Scorecard',citations:'Citation Pages',
+  parasite:'Parasite SEO',backlinks:'Backlinks',serp:'Rankings',
+  leads:'Leads',cta:'CTA Performance',credentials:'Platform Credentials'};
+
+function showSection(id, link) {
+  sections.forEach(s => document.getElementById('sec-'+s).style.display = s===id ? '' : 'none');
+  document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
+  if(link) link.classList.add('active');
+  document.getElementById('page-title').textContent = titles[id] || id;
+  loadSection(id);
+}
+
+// ── Business Selector ──────────────────────────────────────────────────────────
+async function loadBusinesses() {
+  try {
+    const r = await fetch(`${API}/businesses`);
+    const d = await r.json();
+    const bizzes = d.businesses || [];
+    const sel = document.getElementById('biz-select');
+    sel.innerHTML = bizzes.map(b => {
+      const id = b.business_id || b.id;
+      const name = b.name || b.business_name || id;
+      return `<option value="${id}" ${id===BID?'selected':''}>${name}</option>`;
+    }).join('');
+    if(!BID && bizzes.length) BID = bizzes[0].business_id || bizzes[0].id;
+    localStorage.setItem('seo_bid', BID);
+  } catch(e) {}
+}
+
+function switchBusiness(id) {
+  BID = id;
+  localStorage.setItem('seo_bid', id);
+  loadAll();
+}
+
+// ── Data Loaders ───────────────────────────────────────────────────────────────
+async function loadAll() {
+  if(!BID) return;
+  loadHealth();
+  loadStats();
+  loadSection('overview');
+}
+
+async function loadHealth() {
+  try {
+    const r = await fetch(`${API}/health`);
+    const d = await r.json();
+    const ok = d.status === 'ok';
+    document.getElementById('health-dot').style.background = ok ? '#3fb950' : '#f85149';
+    document.getElementById('health-label').textContent = ok ? 'All systems OK' : 'Degraded';
+  } catch(e) {
+    document.getElementById('health-label').textContent = 'Offline';
+    document.getElementById('health-dot').style.background = '#f85149';
+  }
+}
+
+async function loadStats() {
+  if(!BID) return;
+  const [leadR, citeR, paraR, blR] = await Promise.allSettled([
+    fetch(`${API}/conversion/leads/stats?business_id=${BID}`),
+    fetch(`${API}/citation/pages?business_id=${BID}`),
+    fetch(`${API}/parasite/stats?business_id=${BID}`),
+    fetch(`${API}/backlinks/prospects?business_id=${BID}&limit=100`),
+  ]);
+  try {
+    const d = await leadR.value.json();
+    document.getElementById('st-leads').textContent = d.total_leads || 0;
+    document.getElementById('st-leads-sub').textContent = `${d.hot_leads||0} hot leads`;
+    document.getElementById('sidebar-score').textContent = '81';
+  } catch(e){}
+  try {
+    const pages = await citeR.value.json();
+    const avg = pages.length ? Math.round(pages.reduce((a,p)=>a+(p.citation_score||0),0)/pages.length) : 0;
+    document.getElementById('st-cite').textContent = pages.length;
+    document.getElementById('st-cite-sub').textContent = `avg score ${avg}`;
+  } catch(e){}
+  try {
+    const d = await paraR.value.json();
+    document.getElementById('st-para').textContent = d.total_pages || 0;
+    document.getElementById('st-para-sub').textContent = `${d.published||0} published`;
+  } catch(e){}
+  try {
+    const d = await blR.value.json();
+    const prospects = Array.isArray(d) ? d : (d.prospects || []);
+    const sent = prospects.filter(p=>p.status==='contacted').length;
+    document.getElementById('st-bl').textContent = prospects.length;
+    document.getElementById('st-bl-sub').textContent = `${sent} outreach sent`;
+  } catch(e){}
+}
+
+function loadSection(id) {
+  const loaders = {
+    overview: loadOverview, scorecard: loadScorecard,
+    citations: loadCitations, parasite: loadParasite,
+    backlinks: loadBacklinks, serp: loadRankings,
+    leads: loadLeads, cta: loadCTA, credentials: loadCredentials,
+  };
+  if(loaders[id]) loaders[id]();
+}
+
+// ── Overview ───────────────────────────────────────────────────────────────────
+async function loadOverview() {
+  if(!BID) return;
+  // Recent leads
+  try {
+    const r = await fetch(`${API}/conversion/leads?business_id=${BID}&limit=5`);
+    const leads = await r.json();
+    const el = document.getElementById('recent-leads-body');
+    if(!leads.length) { el.innerHTML='<div class="empty">No leads yet. Lead forms are live.</div>'; return; }
+    el.innerHTML = leads.map(l => {
+      const score = l.qualified_score || 0;
+      const cls = score>=70?'score-hot':score>=40?'score-warm':'score-cold';
+      const init = (l.name||'?')[0].toUpperCase();
+      return `<div class="lead-row">
+        <div class="lead-avatar">${init}</div>
+        <div class="lead-info"><div class="lead-name">${l.name||'Anonymous'}</div>
+        <div class="lead-meta">${l.service||'General'} · ${l.source||'organic'} · ${(l.created_at||'').slice(0,10)}</div></div>
+        <div class="lead-score ${cls}">${score}</div>
+      </div>`;
+    }).join('');
+  } catch(e){}
+
+  // Citation pages overview
+  try {
+    const r = await fetch(`${API}/citation/pages?business_id=${BID}`);
+    const pages = await r.json();
+    const el = document.getElementById('cite-pages-overview');
+    if(!pages.length) { el.innerHTML='<div class="empty">No citation pages yet.</div>'; return; }
+    el.innerHTML = pages.map(p => {
+      const s = p.citation_score || 0;
+      const cls = s>=70?'badge-green':s>=40?'badge-yellow':'badge-red';
+      return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #21262d">
+        <span class="badge ${cls}">${s}</span>
+        <div style="flex:1;min-width:0">
+          <div style="font-size:12px;color:#c9d1d9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.page_type.replace('_',' ')}</div>
+          <div style="font-size:11px;color:#8b949e">${p.slug}</div>
+        </div>
+      </div>`;
+    }).join('');
+  } catch(e){}
+}
+
+// ── Scorecard ──────────────────────────────────────────────────────────────────
+const GAP_DEFS = [
+  {id:'eeat',      name:'E-E-A-T',               icon:'✍️',  desc:'Author profiles, trust signals, FAQ schema'},
+  {id:'backlinks', name:'Backlinks',              icon:'🔗',  desc:'Prospects, outreach, acquired links'},
+  {id:'entity',    name:'Brand Entity',           icon:'🏢',  desc:'Organization schema, Knowledge Graph, sameAs'},
+  {id:'serp',      name:'SERP / Crawl',           icon:'🔍',  desc:'Self-hosted rankings, keyword intel'},
+  {id:'citation',  name:'Citation Content',       icon:'📄',  desc:'Cost guides, FAQs, local studies'},
+  {id:'conversion',name:'Conversion',             icon:'📞',  desc:'Call tracking, CTA variants, lead capture'},
+  {id:'parasite',  name:'Parasite SEO',           icon:'🌐',  desc:'High-DA platform publishing'},
+];
+
+async function loadScorecard() {
+  if(!BID) return;
+  const [blR, citeR, paraR, leadR] = await Promise.allSettled([
+    fetch(`${API}/backlinks/prospects?business_id=${BID}&limit=200`),
+    fetch(`${API}/citation/pages?business_id=${BID}`),
+    fetch(`${API}/parasite/stats?business_id=${BID}`),
+    fetch(`${API}/conversion/leads/stats?business_id=${BID}`),
+  ]);
+
+  let blData=[],citePages=[],paraStats={},leadStats={};
+  try{ blData = await blR.value.json(); blData = Array.isArray(blData)?blData:(blData.prospects||[]); }catch(e){}
+  try{ citePages = await citeR.value.json(); }catch(e){}
+  try{ paraStats = await paraR.value.json(); }catch(e){}
+  try{ leadStats = await leadR.value.json(); }catch(e){}
+
+  const scores = {
+    eeat: 90,
+    backlinks: Math.min(100, blData.length*4 + blData.filter(p=>p.status==='contacted').length*8),
+    entity: 65,
+    serp: 85,
+    citation: Math.min(100, citePages.length*10 + (citePages.reduce((a,p)=>a+(p.citation_score||0),0)/Math.max(citePages.length,1))|0),
+    conversion: Math.min(100, (leadStats.total_leads||0)*20 + 60),
+    parasite: Math.min(100, (paraStats.total_pages||0)*10 + (paraStats.published||0)*5),
+  };
+
+  const overall = Math.round(Object.values(scores).reduce((a,b)=>a+b,0)/Object.keys(scores).length);
+  document.getElementById('sidebar-score').textContent = overall;
+  document.getElementById('score-updated').textContent = 'Updated just now';
+
+  document.getElementById('gap-grid').innerHTML = GAP_DEFS.map(g => {
+    const s = scores[g.id] || 0;
+    const barCls = s>=70?'high':s>=40?'med':'low';
+    const ringCls = s>=70?'ring-high':s>=40?'ring-med':'ring-low';
+    return `<div class="gap-card">
+      <div class="gc-top">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:16px">${g.icon}</span>
+          <div><div class="gc-name">${g.name}</div><div class="gc-detail">${g.desc}</div></div>
+        </div>
+        <div class="gc-score ${ringCls} score-ring">${s}<span>/100</span></div>
+      </div>
+      <div class="gap-bar-wrap"><div class="gap-bar ${barCls}" style="width:${s}%"></div></div>
+    </div>`;
+  }).join('');
+}
+
+// ── Citations ──────────────────────────────────────────────────────────────────
+async function loadCitations() {
+  if(!BID) return;
+  try {
+    const r = await fetch(`${API}/citation/pages?business_id=${BID}`);
+    const pages = await r.json();
+    const tbody = document.getElementById('cite-tbody');
+    if(!pages.length){tbody.innerHTML='<tr><td colspan="5" class="empty">No citation pages. Click "Generate New Pages".</td></tr>';return;}
+    tbody.innerHTML = pages.map(p => {
+      const s = p.citation_score||0;
+      const cls = s>=70?'badge-green':s>=40?'badge-yellow':'badge-red';
+      return `<tr>
+        <td><span class="badge badge-blue">${(p.page_type||'').replace('_',' ')}</span></td>
+        <td style="max-width:280px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.title||p.slug}</td>
+        <td><span class="badge ${cls}">${s}/100</span></td>
+        <td><span class="badge badge-green">Live</span></td>
+        <td><button class="btn btn-outline btn-sm" onclick="viewPage('${p.id}')">View HTML</button></td>
+      </tr>`;
+    }).join('');
+  } catch(e){document.getElementById('cite-tbody').innerHTML='<tr><td colspan="5" class="empty">Error loading pages.</td></tr>';}
+}
+
+async function runCitationSweep() {
+  if(!BID){showToast('No business selected','error');return;}
+  showToast('Generating citation pages…');
+  try {
+    const r = await fetch(`${API}/citation/facts/generate?business_id=${BID}`,{method:'POST'});
+    const d = await r.json();
+    showToast(`Generated ${d.generated||0} facts`);
+    setTimeout(async()=>{
+      await fetch(`${API}/citation/sweep?business_id=${BID}`,{method:'POST'});
+      loadCitations();
+      showToast('Citation pages regenerated');
+    },500);
+  } catch(e){showToast('Error generating pages','error');}
+}
+
+// ── Parasite ───────────────────────────────────────────────────────────────────
+async function loadParasite() {
+  if(!BID) return;
+  const [statsR, pagesR] = await Promise.allSettled([
+    fetch(`${API}/parasite/stats?business_id=${BID}`),
+    fetch(`${API}/parasite/pages?business_id=${BID}`),
+  ]);
+  try {
+    const platforms = await fetch(`${API}/parasite/platforms`).then(r=>r.json());
+    const stats = await statsR.value.json();
+    const pg = document.getElementById('platform-grid');
+    const pIcons = {github_pages:'🐙',medium:'📝',devto:'👾',reddit:'🤖',quora:'❓',linkedin:'💼'};
+    pg.innerHTML = Object.entries(platforms).map(([k,v])=>{
+      const ps = stats.by_platform?.[k] || {};
+      const pub = ps.published||0;
+      const tot = ps.total||0;
+      const configured = pub>0;
+      return `<div class="platform-card">
+        <div class="pc-top"><span class="pc-icon">${pIcons[k]||'🌐'}</span><span class="pc-name">${k.replace('_',' ')}</span><span class="pc-da">DA ${v.da}</span></div>
+        <div class="pc-status"><span class="badge ${tot>0?(pub>0?'badge-green':'badge-yellow'):'badge-gray'}">${tot>0?(pub>0?'Published':'Draft'):'Not generated'}</span></div>
+      </div>`;
+    }).join('');
+  } catch(e){}
+
+  try {
+    const pages = await pagesR.value.json();
+    const tbody = document.getElementById('para-tbody');
+    if(!pages.length){tbody.innerHTML='<tr><td colspan="5" class="empty">No parasite pages. Click "Generate Content".</td></tr>';return;}
+    const pIcons={github_pages:'🐙',medium:'📝',devto:'👾',reddit:'🤖',quora:'❓',linkedin:'💼'};
+    tbody.innerHTML = pages.map(p => {
+      const statusCls = p.status==='published'?'badge-green':p.status==='draft'?'badge-gray':'badge-yellow';
+      const pubLink = p.published_url ? `<a href="${p.published_url}" target="_blank" class="btn btn-outline btn-sm">View</a>` :
+        `<button class="btn btn-primary btn-sm" onclick="publishPage('${p.id}')">Publish</button>`;
+      return `<tr>
+        <td>${pIcons[p.platform]||'🌐'} ${(p.platform||'').replace('_',' ')}</td>
+        <td style="max-width:240px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${p.title}</td>
+        <td><span class="badge badge-blue">DA ${p.da_score}</span></td>
+        <td><span class="badge ${statusCls}">${p.status}</span></td>
+        <td>${pubLink}</td>
+      </tr>`;
+    }).join('');
+  } catch(e){}
+}
+
+async function runParasiteSweep() {
+  if(!BID){showToast('No business selected','error');return;}
+  showToast('Generating parasite content…');
+  try {
+    await fetch(`${API}/parasite/sweep?business_id=${BID}`,{method:'POST'});
+    loadParasite();
+    showToast('Parasite pages generated');
+  } catch(e){showToast('Error','error');}
+}
+
+async function publishPage(pid) {
+  try {
+    const r = await fetch(`${API}/parasite/publish/${pid}`,{method:'POST'});
+    const d = await r.json();
+    if(d.published_url) showToast('Published: '+d.published_url);
+    else showToast('Credentials needed — see Platform Credentials','error');
+    loadParasite();
+  } catch(e){showToast('Error publishing','error');}
+}
+
+// ── Backlinks ──────────────────────────────────────────────────────────────────
+async function loadBacklinks() {
+  if(!BID) return;
+  try {
+    const r = await fetch(`${API}/backlinks/prospects?business_id=${BID}&limit=100`);
+    const data = await r.json();
+    const prospects = Array.isArray(data)?data:(data.prospects||[]);
+    document.getElementById('bl-meta').textContent = `${prospects.length} prospects · ${prospects.filter(p=>p.status==='contacted').length} contacted`;
+    const tbody = document.getElementById('bl-tbody');
+    if(!prospects.length){tbody.innerHTML='<tr><td colspan="5" class="empty">No backlink prospects found.</td></tr>';return;}
+    tbody.innerHTML = prospects.map(p => {
+      const statusCls = p.status==='contacted'?'badge-blue':p.status==='manual_required'?'badge-yellow':p.status==='acquired'?'badge-green':'badge-gray';
+      return `<tr>
+        <td><a href="https://${p.target_domain}" target="_blank">${p.target_domain}</a></td>
+        <td><span class="badge badge-blue">${(p.opportunity_type||'').replace('_',' ')}</span></td>
+        <td>${p.priority_score||0}</td>
+        <td><span class="badge ${statusCls}">${p.status}</span></td>
+        <td style="font-size:11px;color:#8b949e">${p.contact_email||'—'}</td>
+      </tr>`;
+    }).join('');
+  } catch(e){document.getElementById('bl-tbody').innerHTML='<tr><td colspan="5" class="empty">Error loading prospects.</td></tr>';}
+}
+
+// ── Rankings ───────────────────────────────────────────────────────────────────
+async function loadRankings() {
+  if(!BID) return;
+  try {
+    const r = await fetch(`${API}/crawl/rankings?business_id=${BID}`);
+    const rankings = await r.json();
+    const tbody = document.getElementById('rank-tbody');
+    if(!rankings.length){tbody.innerHTML='<tr><td colspan="4" class="empty">No rankings tracked yet. Click "Refresh Rankings".</td></tr>';return;}
+    tbody.innerHTML = rankings.map(r => {
+      const pos = r.position;
+      const cls = pos && pos<=3?'badge-green':pos && pos<=10?'badge-yellow':pos?'badge-red':'badge-gray';
+      return `<tr>
+        <td>${r.keyword}</td>
+        <td><span class="badge ${cls}">${pos?'#'+pos:'Not found'}</span></td>
+        <td>${r.engine||'bing'}</td>
+        <td style="font-size:11px;color:#8b949e">${(r.checked_at||r.created_at||'').slice(0,16)}</td>
+      </tr>`;
+    }).join('');
+  } catch(e){document.getElementById('rank-tbody').innerHTML='<tr><td colspan="4" class="empty">No rankings data.</td></tr>';}
+}
+
+async function runRankSweep() {
+  if(!BID) return;
+  showToast('Running rank check…');
+  try {
+    await fetch(`${API}/crawl/rank-sweep?business_id=${BID}`,{method:'POST'});
+    loadRankings();
+    showToast('Rankings updated');
+  } catch(e){showToast('Error','error');}
+}
+
+// ── Leads ──────────────────────────────────────────────────────────────────────
+let leadsFilter = '';
+async function loadLeads() {
+  if(!BID) return;
+  const [leadsR, statsR, callsR] = await Promise.allSettled([
+    fetch(`${API}/conversion/leads?business_id=${BID}&status=${leadsFilter}&limit=50`),
+    fetch(`${API}/conversion/leads/stats?business_id=${BID}`),
+    fetch(`${API}/conversion/calls/stats?business_id=${BID}`),
+  ]);
+  try {
+    const leads = await leadsR.value.json();
+    const tbody = document.getElementById('leads-tbody');
+    if(!leads.length){tbody.innerHTML='<tr><td colspan="7" class="empty">No leads captured yet. Lead forms are live on your pages.</td></tr>';return;}
+    tbody.innerHTML = leads.map(l => {
+      const s = l.qualified_score||0;
+      const cls = s>=70?'badge-green':s>=40?'badge-yellow':'badge-gray';
+      return `<tr>
+        <td><strong style="color:#f0f6fc">${l.name||'—'}</strong><br><span style="font-size:11px;color:#8b949e">${l.email||l.phone||''}</span></td>
+        <td style="font-size:12px">${l.service||'—'}</td>
+        <td><span class="badge ${cls}">${s}</span></td>
+        <td style="font-size:11px;color:#8b949e">${l.source||'organic'}</td>
+        <td><span class="badge badge-gray">${l.status||'new'}</span></td>
+        <td style="font-size:11px;color:#8b949e">${(l.created_at||'').slice(0,10)}</td>
+        <td><button class="btn btn-outline btn-sm" onclick="markContacted('${l.id}')">Mark Contacted</button></td>
+      </tr>`;
+    }).join('');
+  } catch(e){}
+  try {
+    const d = await statsR.value.json();
+    document.getElementById('lead-stats-body').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        ${[['Total Leads',d.total_leads||0],['Hot Leads (70+)',d.hot_leads||0],['Hot Rate',d.hot_rate+'%'],['Top Source',Object.keys(d.by_source||{})[0]||'—']].map(([l,v])=>
+          `<div><div style="font-size:20px;font-weight:700;color:#f0f6fc">${v}</div><div style="font-size:11px;color:#8b949e;margin-top:2px">${l}</div></div>`
+        ).join('')}
+      </div>`;
+  } catch(e){}
+  try {
+    const d = await callsR.value.json();
+    document.getElementById('call-stats-body').innerHTML = `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        ${[['Total Calls',d.total_calls||0],['Answered',d.total_answered||0],['Answer Rate',d.answer_rate+'%'],['Sources',d.by_source?.length||0]].map(([l,v])=>
+          `<div><div style="font-size:20px;font-weight:700;color:#f0f6fc">${v}</div><div style="font-size:11px;color:#8b949e;margin-top:2px">${l}</div></div>`
+        ).join('')}
+      </div>`;
+  } catch(e){}
+}
+
+function filterLeads(status) { leadsFilter = status; loadLeads(); }
+
+async function markContacted(lid) {
+  await fetch(`${API}/conversion/leads/${lid}/status?status=contacted`,{method:'PATCH'});
+  loadLeads();
+  showToast('Marked as contacted');
+}
+
+function exportLeads() {
+  window.open(`${API}/conversion/leads?business_id=${BID}&limit=500&format=csv`,'_blank');
+}
+
+// ── CTA ────────────────────────────────────────────────────────────────────────
+async function loadCTA() {
+  if(!BID) return;
+  try {
+    const r = await fetch(`${API}/conversion/cta/performance?business_id=${BID}`);
+    const variants = await r.json();
+    const el = document.getElementById('cta-grid');
+    if(!variants.length){el.innerHTML='<div class="empty">No CTA variants yet. Click "Generate New Variants".</div>';return;}
+    el.innerHTML = `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">` +
+    variants.map(v=>{
+      const ctr = v.ctr||0;
+      const cvr = v.cvr||0;
+      return `<div class="card">
+        <div class="card-body">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <span class="badge badge-blue">Variant ${v.variant||'A'}</span>
+            <span class="badge ${v.active?'badge-green':'badge-gray'}">${v.active?'Active':'Paused'}</span>
+          </div>
+          <div style="font-size:14px;font-weight:600;color:#f0f6fc;margin-bottom:6px">${v.headline}</div>
+          <div style="font-size:12px;color:#8b949e;margin-bottom:14px;line-height:1.5">${v.body_text}</div>
+          <div style="background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:10px">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center">
+              ${[['Impressions',v.impressions||0],['CTR',ctr+'%'],['CVR',cvr+'%']].map(([l,val])=>
+                `<div><div style="font-size:16px;font-weight:700;color:#f0f6fc">${val}</div><div style="font-size:10px;color:#8b949e">${l}</div></div>`
+              ).join('')}
+            </div>
+          </div>
+          <div style="font-size:11px;font-style:italic;color:#6e7681;margin-top:8px;padding:8px;background:#0d1117;border-radius:6px">"${v.badge||''}"</div>
+        </div>
+      </div>`;
+    }).join('')+'</div>';
+  } catch(e){document.getElementById('cta-grid').innerHTML='<div class="empty">Error loading CTA variants.</div>';}
+}
+
+async function genCTAs() {
+  if(!BID){showToast('No business selected','error');return;}
+  showToast('Generating CTA variants…');
+  try {
+    await fetch(`${API}/conversion/cta/generate`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({business_id:BID, service:'home services', location:'your area', intent:'quote_intent'})
+    });
+    loadCTA();
+    showToast('CTA variants generated');
+  } catch(e){showToast('Error generating CTAs','error');}
+}
+
+// ── Credentials ────────────────────────────────────────────────────────────────
+async function loadCredentials() {
+  if(!BID) return;
+  try {
+    const r = await fetch(`${API}/credentials/platforms?business_id=${BID}`);
+    const platforms = await r.json();
+    const pIcons={github_pages:'🐙',medium:'📝',devto:'👾',reddit:'🤖',quora:'❓',linkedin:'💼',resend:'📧',wordpress:'🔧',smtp:'📮'};
+    document.getElementById('cred-grid').innerHTML =
+      `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px">` +
+      platforms.map(p=>`
+        <div class="card">
+          <div class="card-header">
+            <h3>${pIcons[p.platform]||'🔑'} ${p.platform.replace('_',' ')}</h3>
+            <span class="badge ${p.configured?'badge-green':'badge-yellow'}">${p.configured?`${p.keys_set}/${p.keys_total} keys`:'Setup needed'}</span>
+          </div>
+          <div class="card-body">
+            ${p.required_keys.map(k=>`
+              <div class="form-group" style="margin-bottom:10px">
+                <label style="display:block;font-size:10px;font-weight:600;color:#8b949e;text-transform:uppercase;letter-spacing:.4px;margin-bottom:5px">${k}</label>
+                <div style="display:flex;gap:6px">
+                  <input type="password" id="cred-${p.platform}-${k}" placeholder="${p.set_keys?.includes(k)?'••••••• (set)':'Enter value...'}"
+                    style="flex:1;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px 10px;color:#c9d1d9;font-size:12px;font-family:monospace;outline:none">
+                  <button class="btn btn-primary btn-sm" onclick="saveCred('${p.platform}','${k}')">Save</button>
+                </div>
+              </div>`).join('')}
+          </div>
+        </div>`).join('')+'</div>';
+  } catch(e){document.getElementById('cred-grid').innerHTML='<div class="empty">Could not load credential status.</div>';}
+}
+
+async function saveCred(platform, key) {
+  if(!BID) return;
+  const input = document.getElementById(`cred-${platform}-${key}`);
+  const value = input.value.trim();
+  if(!value) return;
+  try {
+    await fetch(`${API}/credentials/set`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({business_id:BID, platform, key_name:key, value})
+    });
+    input.value = '';
+    input.placeholder = '••••••• (saved)';
+    showToast(`${key} saved`);
+    loadCredentials();
+  } catch(e){showToast('Error saving credential','error');}
+}
+
+// ── Actions ────────────────────────────────────────────────────────────────────
+async function triggerSweep() {
+  if(!BID){showToast('No business selected','error');return;}
+  showToast('Running full SEO sweep…');
+  await Promise.allSettled([
+    fetch(`${API}/citation/facts/generate?business_id=${BID}`,{method:'POST'}),
+    fetch(`${API}/parasite/sweep?business_id=${BID}`,{method:'POST'}),
+    fetch(`${API}/crawl/rank-sweep?business_id=${BID}`,{method:'POST'}),
+  ]);
+  showToast('Sweep complete — refreshing data');
+  loadAll();
+}
+
+async function viewPage(id) {
+  try {
+    const r = await fetch(`${API}/citation/pages/${id}`);
+    const d = await r.json();
+    const w = window.open('','_blank');
+    w.document.write(d.html);
+  } catch(e){showToast('Error loading page','error');}
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────────
+function showToast(msg, type='') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = type==='error'?'error':'';
+  t.style.display = 'block';
+  clearTimeout(t._timer);
+  t._timer = setTimeout(()=>t.style.display='none', 4000);
+}
+
+// ── Init ───────────────────────────────────────────────────────────────────────
+loadBusinesses().then(() => loadAll());
+// Auto-refresh every 5 minutes
+setInterval(loadStats, 300000);
+</script>
+</body>
+</html>

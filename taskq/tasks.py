@@ -3862,3 +3862,17 @@ def run_parasite_rank_check(self, business_id: str = "") -> dict:
     except Exception as exc:
         log.exception("run_parasite_rank_check.error  task_id=%s", self.request.id)
         return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue='content', max_retries=1, name='taskq.tasks.run_onboarding_task')
+def run_onboarding_task(self, profile: dict) -> dict:
+    Run full 9-step onboarding pipeline for a new tenant.
+    log.info('run_onboarding_task.start  task_id=%s  business_id=%s', self.request.id, profile.get('business_id'))
+    try:
+        from core.onboarding_orchestrator import start_onboarding
+        job_id = start_onboarding(profile)
+        log.info('run_onboarding_task.done  task_id=%s  job_id=%s', self.request.id, job_id)
+        return {'status': 'ok', 'job_id': job_id, 'task_id': self.request.id}
+    except Exception as exc:
+        log.exception('run_onboarding_task.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
