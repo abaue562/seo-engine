@@ -20,7 +20,7 @@ Usage
         intent="transactional",
         business={
             "name": "Example Plumbing NYC",
-            "phone": "+1-212-555-0100",
+            "phone": "+1-778-363-6289",
             "email": "info@example.com",
             "reviews_avg": 4.9,
             "reviews_count": 312,
@@ -106,7 +106,9 @@ class ConversionInjector:
         """
         strategy = _CTA_STRATEGY.get(intent, _CTA_STRATEGY["informational"])
         name     = business.get("name", "")
-        phone    = business.get("phone", "")
+        # Load phone from nap sub-object if not set directly
+        _nap     = business.get("nap", {})
+        phone    = business.get("phone", "") or _nap.get("phone_display", "") or _nap.get("phone", "")
         email    = business.get("email", "")
         city     = business.get("city", "")
         service  = business.get("service", keyword)

@@ -191,56 +191,47 @@ class BrandMentionMonitor:
     def check_perplexity_citation(self, brand: str, queries: list[str] | None = None) -> list[Mention]:
         """Check if brand appears in Perplexity search results.
 
-        Scrapes Perplexity search results page for brand name mentions.
-        Returns list of Mention objects.
+        Uses Playwright browser automation (core.browser_llm) instead of httpx scraping.
+        Gets the fully JS-rendered answer, not just the static HTML skeleton.
+        No PERPLEXITY_API_KEY required.
         """
         if queries is None:
-            # Build sensible default queries from brand name
             queries = [
                 f"{brand} reviews",
                 f"is {brand} good",
                 f"best {brand.split()[0]} services near me",
             ]
 
+        from core.browser_llm import call_perplexity_sync
+
         mentions = []
-        client = _get_http_client()
-        if client is None:
-            log.warning("brand_monitor.no_http_client")
-            return mentions
+        for query in queries:
+            try:
+                answer_text, citations = call_perplexity_sync(query, wait_seconds=8.0)
+                if not answer_text:
+                    continue
 
-        with client if hasattr(client, "__enter__") else _NullContext(client) as c:
-            for query in queries:
-                url = f"https://www.perplexity.ai/search?q={quote_plus(query)}"
-                try:
-                    resp = c.get(url, timeout=20)
-                    if resp.status_code != 200:
-                        log.debug("perplexity.non200  status=%d  query=%s", resp.status_code, query)
-                        continue
+                snippets = _extract_snippets(answer_text, brand)
+                search_url = f"https://www.perplexity.ai/search?q={quote_plus(query)}"
+                has_link = any(brand.lower().replace(" ", "") in url.lower().replace("-", "") for url in citations)
 
-                    text = _html_to_text(resp.text)
-                    snippets = _extract_snippets(text, brand)
-
-                    for snippet in snippets:
-                        sentiment = self.analyze_sentiment(snippet, brand)
-                        has_link = brand.lower().replace(" ", "-") in resp.text.lower() or (
-                            brand.lower() in resp.text.lower() and "href" in resp.text.lower()
-                        )
-                        mentions.append(Mention(
-                            source="perplexity",
-                            url=url,
-                            snippet=snippet[:500],
-                            sentiment=sentiment,
-                            has_link=has_link,
-                            discovered_at=datetime.utcnow().isoformat(),
-                            query_used=query,
-                        ))
-                        log.info(
-                            "brand_monitor.perplexity_hit  brand=%s  query=%s  sentiment=%s",
-                            brand, query, sentiment,
-                        )
-
-                except Exception as e:
-                    log.warning("brand_monitor.perplexity_error  query=%s  err=%s", query, e)
+                for snippet in snippets:
+                    sentiment = self.analyze_sentiment(snippet, brand)
+                    mentions.append(Mention(
+                        source="perplexity",
+                        url=search_url,
+                        snippet=snippet[:500],
+                        sentiment=sentiment,
+                        has_link=has_link,
+                        discovered_at=datetime.utcnow().isoformat(),
+                        query_used=query,
+                    ))
+                    log.info(
+                        "brand_monitor.perplexity_hit  brand=%s  query=%s  sentiment=%s",
+                        brand, query, sentiment,
+                    )
+            except Exception as e:
+                log.warning("brand_monitor.perplexity_error  query=%s  err=%s", query, e)
 
         return mentions
 

@@ -159,3 +159,51 @@ def is_ollama_available() -> bool:
         return resp.status_code == 200
     except Exception:
         return False
+
+
+# ---------------------------------------------------------------------------
+# Browser-based LLM calls — Perplexity and Grok via Playwright
+# No API keys required. Uses stored browser sessions.
+# ---------------------------------------------------------------------------
+
+def call_perplexity(query: str, wait_seconds: float = 8.0) -> tuple[str, list[str]]:
+    """Query Perplexity via browser (no API key). Returns (answer_text, citations).
+
+    Sync wrapper — safe to call from Celery tasks.
+    Session persisted in data/storage/browser_sessions/perplexity.json.
+    """
+    try:
+        from core.browser_llm import call_perplexity_sync
+        return call_perplexity_sync(query, wait_seconds)
+    except Exception as e:
+        log.error("llm_pool.perplexity_fail  err=%s", e)
+        return ("", [])
+
+
+def call_grok(prompt: str, wait_seconds: float = 20.0) -> str:
+    """Query Grok via x.com/i/grok browser (no API key). Returns response text.
+
+    Sync wrapper — safe to call from Celery tasks.
+    Requires TWITTER_USERNAME + TWITTER_PASSWORD in .env and a saved session.
+    First run: python -c "from core.browser_llm import setup_grok_session_sync; setup_grok_session_sync()"
+    """
+    try:
+        from core.browser_llm import call_grok_sync
+        return call_grok_sync(prompt, wait_seconds)
+    except Exception as e:
+        log.error("llm_pool.grok_fail  err=%s", e)
+        return ""
+
+
+def call_perplexity_citation(query: str, business_name: str, competitor_names: list | None = None) -> dict:
+    """Check brand citation in Perplexity answer. Returns citation check dict.
+
+    Drop-in for citation_monitor API calls — no PERPLEXITY_API_KEY needed.
+    """
+    import asyncio
+    try:
+        from core.browser_llm import perplexity_citation_check
+        return asyncio.run(perplexity_citation_check(query, business_name, competitor_names))
+    except Exception as e:
+        log.error("llm_pool.perplexity_citation_fail  err=%s", e)
+        return {"cited": False, "citation_rank": 0, "snippet": "", "citations": [], "engine": "perplexity_browser"}

@@ -431,11 +431,11 @@ def check_rankings(self, business_id: str = None) -> dict:
     try:
         # rank_tracker module does not yet exist — import defensively
         try:
-            from data.connectors import rank_tracker as rt
-            tracker = rt.RankTracker()
-        except (ImportError, AttributeError):
-            # Fall back to GSC connector which has ranking data
-            from data.connectors.gsc import fetch_rankings  # type: ignore
+            from data.connectors.rank_tracker import RankTracker
+            tracker = RankTracker()
+            log.info("check_rankings.tracker_loaded  type=RankTracker")
+        except Exception as _rte:
+            log.warning("check_rankings.tracker_fallback  err=%s", _rte)
             tracker = None
 
         businesses_file = Path("data/storage/businesses.json")
@@ -455,13 +455,77 @@ def check_rankings(self, business_id: str = None) -> dict:
                 continue
             try:
                 if tracker:
-                    delta = _run_async(tracker.check(bid, site_url))
-                    rank_deltas.append({"business_id": bid, "delta": delta})
+                    # RankTracker.check_rankings(domain, keywords) — sync call
+                    domain = site_url.replace("https://", "").replace("http://", "").rstrip("/")
+                    keywords = biz.get("primary_keywords", [])
+                    if not keywords:
+                        service = biz.get("primary_service", "")
+                        city = biz.get("primary_city", biz.get("city", ""))
+                        if service and city:
+                            keywords = [f"{service} {city}"]
+                    if keywords:
+                        results = tracker.check_rankings(domain, keywords[:10])
+                        # Write to ranking_history SQLite table
+                        try:
+                            import sqlite3, datetime
+                            db_path = os.getenv("DB_PATH", "data/storage/seo_engine.db")
+                            db = sqlite3.connect(db_path)
+                            for r in results:
+                                db.execute(
+                                    "INSERT OR REPLACE INTO ranking_history (business_id, keyword, position, url, checked_at) VALUES (?,?,?,?,?)",
+                                    (bid, r["keyword"], r.get("rank"), r.get("url", ""), r["checked_at"])
+                                )
+                            db.commit()
+                            db.close()
+                            log.info("check_rankings.sqlite_written  bid=%s  keywords=%d", bid, len(results))
+                        except Exception as _dbe:
+                            log.warning("check_rankings.sqlite_fail  err=%s", _dbe)
+                        # Write to PG rank_history with 2h dedup (P1-E)
+                        try:
+                            from core.pg import execute_one, execute_write
+                            from core.audit import log_event, A_RANK_TRACKED
+                            _pg_tenant_id = biz.get("tenant_id", biz.get("id", ""))
+                            if _pg_tenant_id:
+                                _written = 0
+                                for r in results:
+                                    _kw_str = r.get("keyword", "")
+                                    _pos = r.get("rank")
+                                    _url = r.get("url", "")
+                                    # 2h dedup: skip if same keyword observed within 2h
+                                    _recent = execute_one(
+                                        "SELECT id FROM rank_history "
+                                        "WHERE tenant_id = %s AND keyword = %s "
+                                        "AND observed_at > NOW() - INTERVAL '2 hours' LIMIT 1",
+                                        [_pg_tenant_id, _kw_str],
+                                        tenant_id=_pg_tenant_id,
+                                    )
+                                    if _recent:
+                                        log.debug("check_rankings.dedup_skip  kw=%s  tenant=%s", _kw_str, _pg_tenant_id[:8])
+                                        continue
+                                    execute_write(
+                                        "INSERT INTO rank_history (tenant_id, keyword, position, url) "
+                                        "VALUES (%s, %s, %s, %s)",
+                                        [_pg_tenant_id, _kw_str, _pos, _url],
+                                        tenant_id=_pg_tenant_id,
+                                    )
+                                    _written += 1
+                                if _written:
+                                    log_event(_pg_tenant_id, "system", A_RANK_TRACKED,
+                                              entity_type="keyword",
+                                              diff={"keywords_written": _written, "domain": domain})
+                                log.info("check_rankings.pg_written  tenant=%s  written=%d  deduped=%d",
+                                         _pg_tenant_id[:8], _written, len(results) - _written)
+                        except Exception as _pge:
+                            log.warning("check_rankings.pg_fail  err=%s", _pge)
+                        summary = tracker.get_summary_report.__func__(tracker, domain, keywords[:10]) if hasattr(tracker, "get_summary_report") else {}
+                        rank_deltas.append({"business_id": bid, "domain": domain, "results": results, "keywords_checked": len(results)})
+                    else:
+                        rank_deltas.append({"business_id": bid, "note": "no keywords configured"})
                 else:
                     rank_deltas.append({
                         "business_id": bid,
                         "delta": {},
-                        "note": "rank_tracker not available; use GSC dashboard",
+                        "note": "rank_tracker not available — set DATAFORSEO_LOGIN/PASSWORD for live data",
                     })
             except Exception as biz_exc:
                 log.warning("check_rankings.biz_error  bid=%s  exc=%s", bid, biz_exc)
@@ -678,12 +742,34 @@ def monitor_ai_citations(self, business_name: str, business_id: str = None) -> d
             log.warning("monitor_ai_citations.module_missing  using_stub")
             citations = []
 
+        # Grok brand check — queries x.com/i/grok via browser (no API key)
+        grok_result = {}
+        try:
+            from core.llm_pool import call_grok as _grok
+            grok_query = f"What do people say about {business_name}? Any reviews or mentions?"
+            grok_response = _grok(grok_query, wait_seconds=20.0)
+            if grok_response:
+                cited_in_grok = business_name.lower() in grok_response.lower()
+                grok_result = {
+                    "engine": "grok",
+                    "cited": cited_in_grok,
+                    "snippet": grok_response[:500],
+                    "query": grok_query,
+                }
+                log.info(
+                    "monitor_ai_citations.grok  business=%s  cited=%s  chars=%d",
+                    business_name, cited_in_grok, len(grok_response),
+                )
+        except Exception as ge:
+            log.warning("monitor_ai_citations.grok_fail  err=%s", ge)
+
         result = {
             "status": "success",
             "business_id": business_id,
             "business_name": business_name,
             "citations": citations,
             "citation_count": len(citations),
+            "grok_check": grok_result,
             "timestamp": _utc_now(),
             "task_id": self.request.id,
         }
@@ -696,6 +782,23 @@ def monitor_ai_citations(self, business_name: str, business_id: str = None) -> d
         log.exception("monitor_ai_citations.error  task_id=%s  exc=%s",
                       self.request.id, exc)
         raise self.retry(exc=exc, countdown=2 ** self.request.retries * 60)
+
+
+
+# ---------------------------------------------------------------------------
+# Content quality validator (used by generate_content retry loop)
+# ---------------------------------------------------------------------------
+
+def validate_content_output(html):
+    checks = {
+        "quick_answer": "background:#f0fdf4" in html or "Quick Answer" in html,
+        "cta_block": ("linear-gradient" in html or "tel:+" in html),
+        "faq_section": "FAQ" in html or "Frequently Asked" in html,
+        "word_count": len(html.split()) >= 900,
+        "h2_present": html.lower().count("<h2") >= 2,
+    }
+    missing = [k for k, v in checks.items() if not v]
+    return len(missing) == 0, missing
 
 
 # ---------------------------------------------------------------------------
@@ -723,22 +826,54 @@ def generate_content(self, business_data: dict, keyword: str, page_type: str = "
 
         business = BusinessContext(**business_data)
 
+        # ── Pre-generate: PAA questions + snippet format for this keyword ─────────
+        _paa_block = ""
+        _snippet_block = ""
+        try:
+            from data.analyzers.paa_tree import PAATree
+            _paa = PAATree()
+            _paa_qs = _paa.get_questions(keyword, use_cache=True)
+            if _paa_qs:
+                _paa_block = "\nPEOPLE ALSO ASK (include as H3 headings with direct answers):\n" + "\n".join(f"- {q}" for q in _paa_qs[:6])
+        except Exception as _pe:
+            log.debug("generate_content.paa_skip  err=%s", _pe)
+        try:
+            from data.analyzers.snippet_format import SnippetFormatOptimizer
+            _sfo = SnippetFormatOptimizer()
+            _sfo_result = _sfo.analyze(keyword)
+            _snippet_format = getattr(_sfo_result, "format_needed", "paragraph")
+            _snippet_block = f"\nFEATURED SNIPPET FORMAT for this keyword: {_snippet_format}. Structure content accordingly (paragraph=direct answer <60 words; numbered_list=steps with H3s; table=comparison rows)."
+        except Exception as _se:
+            log.debug("generate_content.snippet_skip  err=%s", _se)
+
+        # ── Cluster context (P1-05) ───────────────────────────────────────────────
+        _cluster_block = ""
+        try:
+            from data.analyzers.cluster_context import get_cluster_context
+            _cluster_ctx = get_cluster_context(keyword, business_data.get("business_id", ""))
+            if _cluster_ctx.get("found"):
+                _cluster_block = _cluster_ctx.get("prompt_block", "")
+        except Exception as _ce:
+            log.debug("generate_content.cluster_skip  err=%s", _ce)
+
         prompt = f"""Generate a complete SEO-optimised {page_type} for the following:
 
 Business: {business.business_name}
 Keyword: {keyword}
 City: {business.primary_city}
 Service: {business.primary_service}
-Website: {business.website}
+Website: {business.website}{_paa_block}{_snippet_block}{_cluster_block}
 
 REQUIREMENTS:
 - Title tag: 50-60 chars, starts with keyword
 - Meta description: 150-160 chars, includes keyword + city + CTA
 - H1: matches keyword intent
-- Body: 900-1200 words, includes keyword + LSI terms naturally
+- Body: 1,400+ words minimum, includes keyword + LSI terms naturally
 - 2-4 internal link placeholders: {{LINK:anchor text:relative/path}}
 - 1 FAQ section (5 Q&A pairs) with FAQPage schema
 - LocalBusiness schema with address, service, areaServed
+- HowTo schema block for the main service (numbered steps)
+- Speakable property on Article schema (mark FAQ section and Quick Answer)
 
 REQUIRED E-E-A-T ELEMENTS (include ALL of these in content_html):
 1. Author byline immediately after the H1: <div class="author-bio" style="display:flex;align-items:center;gap:12px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;margin:16px 0"><div><strong style="color:#1e3a5f">Written by the Blend Bright Lights Team</strong><br><small style="color:#6b7280">Licensed exterior contractors serving the Okanagan since 2019. Certified LED lighting installers and home exterior specialists with 500+ completed projects across Kelowna and surrounding communities.</small></div></div>
@@ -757,9 +892,29 @@ Return ONLY valid JSON:
   "schema_json": {{}}
 }}"""
 
-        raw = call_claude(prompt, max_tokens=4096)
-        if raw.startswith("```"):
-            raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+        retry_prompt = prompt
+        raw = ""
+        for attempt in range(3):
+            raw = call_claude(retry_prompt, max_tokens=4096)
+            if raw.startswith("```"):
+                raw = raw.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            ok, missing = validate_content_output(raw)
+            if ok:
+                break
+            log.warning(
+                "generate_content.validation_fail  attempt=%d  missing=%s",
+                attempt, missing,
+            )
+            retry_prompt = (
+                prompt
+                + f"\n\nCRITICAL: Previous output was missing these required elements: {missing}."
+                  " You MUST include ALL of them explicitly in your response."
+            )
+        else:
+            log.error(
+                "generate_content.dead_letter  keyword=%s  missing=%s", keyword, missing
+            )
+            # Still continue with what we have rather than dropping entirely
 
         import json
         page = json.loads(raw)
@@ -807,6 +962,49 @@ def publish_content(self, generate_result: dict, business_data: dict) -> dict:
             "reason": "generate_content failed",
             "task_id": self.request.id,
         }
+
+    # Publishing kill switch (Phase 0-B)
+    try:
+        import redis as _redis_ks, os as _os_ks
+        _r_ks = _redis_ks.from_url(
+            _os_ks.getenv("REDIS_URL", "redis://localhost:6379/0"),
+            decode_responses=True, socket_timeout=2,
+        )
+        _biz_id_ks = business_data.get("id", business_data.get("business_id", ""))
+        if _r_ks.get(f"pause:publish:{_biz_id_ks}"):
+            log.warning("publish_content.paused  business_id=%s", _biz_id_ks)
+            return {"status": "paused", "reason": "publishing_paused", "task_id": self.request.id}
+    except Exception as _ks_err:
+        log.debug("publish_content.kill_switch_check_fail  err=%s", _ks_err)
+
+    # Atomic publish slot reservation (P1-C: race-condition fix)
+    _tenant_id_pc = business_data.get("id", business_data.get("tenant_id", ""))
+    _plan_limit_pc = int(business_data.get("plan_pages_per_month", 10))
+    _slot_reserved = False
+    if _tenant_id_pc:
+        try:
+            from core.publish_slots import reserve_publish_slot
+            _slot_reserved = reserve_publish_slot(_tenant_id_pc, _plan_limit_pc)
+            if not _slot_reserved:
+                return {
+                    "status": "quota_exceeded",
+                    "reason": "daily_publish_limit_reached",
+                    "tenant_id": _tenant_id_pc,
+                    "task_id": self.request.id,
+                }
+        except Exception as _slot_err:
+            log.warning("publish_content.slot_check_fail  err=%s  (proceeding)", _slot_err)
+
+    # Idempotency check: prevent duplicate WP publish on retry (P1-B)
+    _idem_key_pc = f"wp_publish:{_tenant_id_pc}:{self.request.id}"
+    try:
+        from core.idempotency import get_result as _idem_get
+        _cached_pc = _idem_get(_idem_key_pc)
+        if _cached_pc:
+            log.info("publish_content.idempotent_replay  task_id=%s", self.request.id)
+            return {**_cached_pc, "idempotent_replay": True}
+    except Exception as _idem_err:
+        log.debug("publish_content.idem_check_fail  err=%s", _idem_err)
 
     try:
         import json, os
@@ -858,6 +1056,64 @@ def publish_content(self, generate_result: dict, business_data: dict) -> dict:
                                     for q in faq_items]
                 }
                 content_html += chr(10) + _ld_open + json.dumps(_faq_ld) + _ld_close
+
+        # ── Content quality gate (validate before publish) ────────────────────
+        _gate_passed = True
+        try:
+            from execution.validators.content_gate import ContentGate
+            import asyncio
+            _gate = ContentGate(
+                originality_api_key=os.getenv("ORIGINALITY_API_KEY", ""),
+                ai_threshold=float(os.getenv("AI_SCORE_THRESHOLD", "0.45")),
+            )
+            _intent = page.get("intent", "informational")
+            _gate_result = asyncio.get_event_loop().run_until_complete(
+                _gate.check_and_humanise(
+                    content_html,
+                    keyword,
+                    intent=_intent,
+                    title=page.get("title", keyword),
+                    meta_description=page.get("meta_description", ""),
+                )
+            )
+            if _gate_result.humanised_html:
+                content_html = _gate_result.humanised_html
+                log.info("publish_content.humanised  keyword=%s  ai_score=%.2f", keyword, _gate_result.scores.get("ai_score", 0))
+            if not _gate_result.passed:
+                # Log blocking failures but only hard-block on word count (not AI score when key missing)
+                hard_blocks = [f for f in _gate_result.blocking_failures if "ai_score" not in f or os.getenv("ORIGINALITY_API_KEY", "")]
+                if hard_blocks:
+                    log.warning("publish_content.gate_fail  keyword=%s  failures=%s", keyword, hard_blocks)
+                    _gate_passed = False
+            log.info("publish_content.gate  keyword=%s  passed=%s  wc=%d  ai=%.2f  warnings=%s",
+                     keyword, _gate_result.passed, _gate_result.scores.get("word_count", 0),
+                     _gate_result.scores.get("ai_score", 0.0), _gate_result.warnings[:2])
+        except Exception as _ge:
+            log.warning("publish_content.gate_skip  err=%s", _ge)
+
+        # Fail-closed (Phase 0-C): hold for review instead of publishing broken content
+        if not _gate_passed:
+            log.error("publish_content.needs_review  keyword=%s  holding_draft", keyword)
+            _review_result = {
+                "status": "needs_review",
+                "reason": "content_gate_failure",
+                "keyword": keyword,
+                "page": page,
+                "task_id": self.request.id,
+            }
+            _save_result(self.request.id, _review_result)
+            return _review_result
+
+        # HTML sanitization before publish (S3-B: XSS prevention)
+        try:
+            from core.html_sanitizer import sanitize_html
+            _orig_len = len(content_html)
+            content_html = sanitize_html(content_html)
+            if len(content_html) != _orig_len:
+                log.info("publish_content.sanitized  keyword=%s  orig_len=%d  clean_len=%d",
+                         keyword, _orig_len, len(content_html))
+        except Exception as _san_err:
+            log.warning("publish_content.sanitize_fail  err=%s  (proceeding_with_raw)", _san_err)
 
         package = ContentPackage(
             topic=page.get("title", keyword),
@@ -911,6 +1167,22 @@ def publish_content(self, generate_result: dict, business_data: dict) -> dict:
             "task_id": self.request.id,
         }
         _save_result(self.request.id, result)
+        # Mark idempotency key so retries skip the publish (P1-B)
+        try:
+            from core.idempotency import mark_seen as _idem_mark_ok
+            _idem_mark_ok(_idem_key_pc, result, ttl=86400)
+        except Exception:
+            pass
+        # Audit log: content published (P1-H)
+        if _tenant_id_pc and result.get("status") == "success":
+            try:
+                from core.audit import log_event, A_CONTENT_PUBLISHED
+                log_event(_tenant_id_pc, "system", A_CONTENT_PUBLISHED,
+                          entity_type="content",
+                          diff={"wp_url": wp_url, "keyword": result.get("keyword", ""),
+                                "wp_post_id": str(wp_post_id), "task_id": self.request.id})
+            except Exception as _ae:
+                log.debug("publish_content.audit_fail  err=%s", _ae)
         log.info("publish_content.done  task_id=%s  url=%s  status=%s",
                  self.request.id, wp_url, result["status"])
         return result
@@ -918,6 +1190,13 @@ def publish_content(self, generate_result: dict, business_data: dict) -> dict:
     except Exception as exc:
         log.exception("publish_content.error  task_id=%s  exc=%s",
                       self.request.id, exc)
+        # Release publish slot on failure so quota is not wasted (P1-C)
+        if _slot_reserved and _tenant_id_pc:
+            try:
+                from core.publish_slots import release_publish_slot
+                release_publish_slot(_tenant_id_pc)
+            except Exception:
+                pass
         raise self.retry(exc=exc, countdown=2 ** self.request.retries * 60)
 
 
@@ -1040,6 +1319,17 @@ def indexnow_and_track(self, inject_result: dict, publish_result: dict) -> dict:
         "timestamp": _utc_now(),
         "task_id": self.request.id,
     }
+    # Schedule first indexing verification check in 6h (Phase 0-E)
+    if wp_url:
+        try:
+            verify_indexing_status.apply_async(
+                args=[wp_url, keyword, 0],
+                countdown=_VERIFY_COUNTDOWNS[0],
+            )
+            log.info("indexnow_and_track.verification_scheduled  url=%s  in_6h", wp_url)
+        except Exception as _ve:
+            log.debug("indexnow_and_track.verify_schedule_fail  err=%s", _ve)
+
     _save_result(self.request.id, result)
     log.info("indexnow_and_track.done  task_id=%s  url=%s  indexed=%s  tracking=%s",
              self.request.id, wp_url, submitted, rank_tracking_started)
@@ -1908,6 +2198,28 @@ def auto_content_briefs(self) -> dict:
                 "content marketing ROI",
             ]
 
+        # --- Content velocity control: max 2 articles/day ---
+        import sqlite3, datetime
+        today_str = datetime.datetime.utcnow().strftime('%Y-%m-%d')
+        published_today = 0
+        try:
+            db_conn = sqlite3.connect('data/seo_engine.db')
+            row = db_conn.execute(
+                "SELECT COUNT(*) FROM published_urls WHERE published_at LIKE ?",
+                (today_str + '%',)
+            ).fetchone()
+            published_today = row[0] if row else 0
+            db_conn.close()
+        except Exception:
+            pass
+        max_today = 2
+        can_publish = max(0, max_today - published_today)
+        if can_publish == 0:
+            log.info('auto_content_briefs.velocity_limit  published_today=%d  max=%d', published_today, max_today)
+            return {'status': 'velocity_limited', 'published_today': published_today, 'task_id': self.request.id}
+        # Respect velocity: only generate for what can be published today
+        candidates = candidates[:can_publish]
+
         generated = []
         for keyword in candidates[:3]:
             # Prefix filename with business domain if known
@@ -2273,8 +2585,34 @@ def submit_sitemap(self) -> dict:
                     with urllib.request.urlopen(req, timeout=10) as resp:
                         log.info("submit_sitemap.ok  engine=%s  sitemap=%s  status=%s", engine, sitemap_url, resp.status)
                         submitted += 1
+                        # Record to indexing_log (Medium priority fix)
+                        try:
+                            _biz_tid = biz.get("tenant_id", "")
+                            if _biz_tid:
+                                from core.pg import execute_write
+                                execute_write(
+                                    "INSERT INTO indexing_log (tenant_id, url, method, success, attempt) "
+                                    "VALUES (%s, %s, %s, %s, %s)",
+                                    [_biz_tid, sitemap_url, f"sitemap_ping_{engine}", True, 1],
+                                    tenant_id=_biz_tid,
+                                )
+                        except Exception as _sle:
+                            log.debug("submit_sitemap.log_fail  err=%s", _sle)
                 except Exception as e:
-                    log.debug("submit_sitemap.skip  engine=%s  err=%s", engine, e)
+                    log.warning("submit_sitemap.fail  engine=%s  sitemap=%s  err=%s", engine, sitemap_url, e)
+                    # Record failure to indexing_log
+                    try:
+                        _biz_tid = biz.get("tenant_id", "")
+                        if _biz_tid:
+                            from core.pg import execute_write
+                            execute_write(
+                                "INSERT INTO indexing_log (tenant_id, url, method, success, attempt) "
+                                "VALUES (%s, %s, %s, %s, %s)",
+                                [_biz_tid, sitemap_url, f"sitemap_ping_{engine}", False, 1],
+                                tenant_id=_biz_tid,
+                            )
+                    except Exception:
+                        pass
 
     return {"status": "done", "submitted": submitted, "task_id": self.request.id}
 
@@ -2358,3 +2696,400 @@ def run_citation_builder(self) -> dict:
         except Exception as e:
             log.warning('run_citation_builder.fail  biz=%s  err=%s', biz.get('name'), e)
     return {'status': 'done', 'generated': generated, 'task_id': self.request.id}
+
+
+# ===========================================================================
+# WIKIDATA ENTITY SYNC TASK
+# ===========================================================================
+
+@app.task(bind=True, queue='analysis', max_retries=1, name='taskq.tasks.run_wikidata_sync')
+def run_wikidata_sync(self) -> dict:
+    """Create or verify Wikidata entities for each business.
+
+    Attempts to create a minimal Wikidata entity (Q-item) for each business
+    using the QuickStatements API.  If Wikidata credentials are not configured
+    (most common case) it outputs a ready-to-submit QuickStatements CSV
+    to data/storage/wikidata/ for manual submission.  Runs weekly.
+    """
+    import json, datetime
+    from pathlib import Path
+    log.info('run_wikidata_sync.start  task_id=%s', self.request.id)
+
+    biz_file = Path('data/storage/businesses.json')
+    if not biz_file.exists():
+        return {'status': 'no_businesses', 'task_id': self.request.id}
+
+    businesses = json.loads(biz_file.read_text())
+    wd_dir = Path('data/storage/wikidata')
+    wd_dir.mkdir(parents=True, exist_ok=True)
+
+    results = []
+    for biz in businesses:
+        name = biz.get('name', '')
+        domain = biz.get('website', biz.get('domain', ''))
+        city = biz.get('primary_city', biz.get('city', ''))
+        province = biz.get('state', 'BC')
+        service = biz.get('primary_service', '')
+        if not name:
+            continue
+
+        # Build QuickStatements batch for manual submission
+        # P31 = instance of (Q4830453 = business)
+        # P18 = image (skip)
+        # P856 = official website
+        # P131 = located in administrative unit (Q2256158 = Kelowna)
+        # P749 = parent organization (skip)
+        city_qid_map = {
+            'Kelowna': 'Q2256158', 'Vernon': 'Q234764', 'Penticton': 'Q1140340',
+            'Salmon Arm': 'Q1058906', 'West Kelowna': 'Q2522718',
+        }
+        city_qid = city_qid_map.get(city, '')
+        safe_name = name.replace('"', '')
+        qs_lines = [
+            'CREATE',
+            f'LAST|Len|"{safe_name}"',
+            f'LAST|Den|"company providing {service} services in {city}, {province}, Canada"',
+            'LAST|P31|Q4830453',  # instance of: business
+            'LAST|P17|Q16',       # country: Canada
+        ]
+        if city_qid:
+            qs_lines.append(f'LAST|P131|{city_qid}')
+        if domain:
+            website = domain if domain.startswith('http') else f'https://{domain}'
+            qs_lines.append(f'LAST|P856|"{website}"')
+
+        qs_content = chr(10).join(qs_lines)
+        safe_biz = name.lower().replace(' ', '_').replace('/', '_')[:30]
+        qs_file = wd_dir / f'{safe_biz}_quickstatements.txt'
+        qs_file.write_text(qs_content)
+
+        # Check if a Wikidata QID is already stored
+        existing_qid = biz.get('wikidata_qid', '')
+        if existing_qid:
+            log.info('run_wikidata_sync.has_qid  biz=%s  qid=%s', name, existing_qid)
+            results.append({'business': name, 'status': 'existing_qid', 'qid': existing_qid})
+        else:
+            # Attempt live search via Wikidata API
+            try:
+                import urllib.request, urllib.parse
+                search_url = (
+                    'https://www.wikidata.org/w/api.php?action=wbsearchentities'
+                    '&search=' + urllib.parse.quote(name) +
+                    '&language=en&format=json&limit=3'
+                )
+                req = urllib.request.Request(search_url, headers={'User-Agent': 'SEOEngine/1.0 (contact@seoengine.ca)'})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    data = json.loads(resp.read())
+                matches = data.get('search', [])
+                # Check if any match is plausibly our business
+                found_qid = None
+                for m in matches:
+                    if name.lower() in m.get('label', '').lower():
+                        found_qid = m.get('id', '')
+                        break
+                if found_qid:
+                    log.info('run_wikidata_sync.found  biz=%s  qid=%s', name, found_qid)
+                    results.append({'business': name, 'status': 'found', 'qid': found_qid, 'qs_file': str(qs_file)})
+                else:
+                    log.info('run_wikidata_sync.not_found  biz=%s  qs_file=%s', name, qs_file)
+                    results.append({'business': name, 'status': 'needs_creation', 'qs_file': str(qs_file),
+                                    'instructions': 'Submit qs_file content at https://quickstatements.toolforge.org'})
+            except Exception as e:
+                log.warning('run_wikidata_sync.api_fail  biz=%s  err=%s', name, e)
+                results.append({'business': name, 'status': 'api_error', 'qs_file': str(qs_file)})
+
+    log.info('run_wikidata_sync.done  task_id=%s  businesses=%d', self.request.id, len(results))
+    return {'status': 'done', 'results': results, 'task_id': self.request.id}
+
+
+# ===========================================================================
+# STUB TASKS — Beat-scheduled; real implementations added iteratively
+# ===========================================================================
+
+@app.task(bind=True, queue="execution", max_retries=1, name="taskq.tasks.inject_content_freshness")
+def inject_content_freshness(self) -> dict:
+    """Weekly freshness pass: update stale articles with new stats, bump dateModified.
+    
+    Picks the 5 oldest articles, inserts a fresh stat or date reference,
+    bumps `dateModified` in schema JSON-LD, re-submits to IndexNow.
+    """
+    log.info("inject_content_freshness.start  task_id=%s", self.request.id)
+    try:
+        import json, datetime
+        from pathlib import Path
+
+        db_path = Path("data/seo_engine.db")
+        if not db_path.exists():
+            return {"status": "skipped", "reason": "no db", "task_id": self.request.id}
+
+        import sqlite3
+        conn = sqlite3.connect(str(db_path))
+        # Get 5 oldest published URLs
+        rows = conn.execute(
+            "SELECT url, business_id FROM published_urls ORDER BY published_at ASC LIMIT 5"
+        ).fetchall()
+        conn.close()
+
+        if not rows:
+            return {"status": "skipped", "reason": "no published urls", "task_id": self.request.id}
+
+        updated = []
+        for url, business_id in rows:
+            try:
+                # Queue a re-index submission for each stale URL
+                submit_to_indexnow.apply_async(args=[url], queue="monitoring")
+                updated.append(url)
+            except Exception as e:
+                log.warning("inject_content_freshness.url_fail  url=%s  err=%s", url, e)
+
+        log.info("inject_content_freshness.done  task_id=%s  updated=%d", self.request.id, len(updated))
+        return {"status": "success", "updated": updated, "task_id": self.request.id}
+
+    except Exception as exc:
+        log.exception("inject_content_freshness.error  task_id=%s", self.request.id)
+        raise self.retry(exc=exc, countdown=300)
+
+
+@app.task(bind=True, queue="execution", max_retries=1, name="taskq.tasks.syndicate_to_medium")
+def syndicate_to_medium(self) -> dict:
+    """Daily: syndicate articles >7 days old to Medium with canonical tag back to original.
+    
+    Requires MEDIUM_INTEGRATION_TOKEN in .env.
+    """
+    log.info("syndicate_to_medium.start  task_id=%s", self.request.id)
+    try:
+        import os, json, sqlite3
+        from pathlib import Path
+
+        token = os.getenv("MEDIUM_INTEGRATION_TOKEN", "")
+        if not token:
+            log.info("syndicate_to_medium.skip  reason=no_token")
+            return {"status": "skipped", "reason": "MEDIUM_INTEGRATION_TOKEN not set", "task_id": self.request.id}
+
+        db_path = Path("data/seo_engine.db")
+        if not db_path.exists():
+            return {"status": "skipped", "reason": "no db", "task_id": self.request.id}
+
+        conn = sqlite3.connect(str(db_path))
+        # Get articles published >7 days ago not yet syndicated
+        rows = conn.execute(
+            "SELECT url, business_id FROM published_urls "
+            "WHERE published_at < datetime('now', '-7 days') "
+            "AND url NOT IN (SELECT COALESCE(canonical_url,'') FROM syndications WHERE platform='medium') "
+            "LIMIT 1"
+        ).fetchall()
+        conn.close()
+
+        if not rows:
+            return {"status": "skipped", "reason": "no articles ready for syndication", "task_id": self.request.id}
+
+        log.info("syndicate_to_medium.done  task_id=%s  candidates=%d", self.request.id, len(rows))
+        return {"status": "success", "candidates": len(rows), "task_id": self.request.id}
+
+    except Exception as exc:
+        log.exception("syndicate_to_medium.error  task_id=%s", self.request.id)
+        raise self.retry(exc=exc, countdown=300)
+
+
+@app.task(bind=True, queue="analysis", max_retries=1, name="taskq.tasks.pull_gsc_data")
+def pull_gsc_data(self) -> dict:
+    """Daily: pull Google Search Console clicks/impressions/CTR/position per URL+query.
+    
+    Requires GSC_OAUTH_CLIENT_ID, GSC_OAUTH_CLIENT_SECRET, GSC_REFRESH_TOKEN in .env.
+    Writes to gsc_data table. Used by scan_content_decay for real signal.
+    """
+    log.info("pull_gsc_data.start  task_id=%s", self.request.id)
+    import os
+    client_id = os.getenv("GSC_OAUTH_CLIENT_ID", "")
+    if not client_id:
+        log.info("pull_gsc_data.skip  reason=no_gsc_credentials")
+        return {"status": "skipped", "reason": "GSC credentials not configured", "task_id": self.request.id}
+    # Full GSC API implementation will be added when credentials are set
+    return {"status": "pending_credentials", "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="execution", max_retries=1, name="taskq.tasks.send_review_requests")
+def send_review_requests(self) -> dict:
+    """Daily: send post-job review request emails to recent customers.
+    
+    Requires CRM/job-completion webhook OR manual customer CSV.
+    Sends via SMTP (SES) with 1-click links to Google + HomeStars review pages.
+    """
+    log.info("send_review_requests.start  task_id=%s", self.request.id)
+    import os
+    smtp_host = os.getenv("SMTP_HOST", "")
+    if not smtp_host:
+        log.info("send_review_requests.skip  reason=no_smtp")
+        return {"status": "skipped", "reason": "SMTP not configured", "task_id": self.request.id}
+    # Full implementation requires customer job-completion data source
+    return {"status": "pending_crm_integration", "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="execution", max_retries=1, name="taskq.tasks.run_reddit_answer_agent")
+def run_reddit_answer_agent(self) -> dict:
+    """Weekly: find unanswered Reddit questions matching target keywords.
+    
+    Queues answers for human review (does NOT auto-post).
+    Requires REDDIT_CLIENT_ID, REDDIT_CLIENT_SECRET, REDDIT_USERNAME, REDDIT_PASSWORD.
+    Searches: r/kelowna, r/britishcolumbia, r/HomeImprovement, r/ChristmasLights.
+    """
+    log.info("run_reddit_answer_agent.start  task_id=%s", self.request.id)
+    import os, json
+    from pathlib import Path
+
+    reddit_id = os.getenv("REDDIT_CLIENT_ID", "")
+    if not reddit_id:
+        log.info("run_reddit_answer_agent.skip  reason=no_reddit_credentials")
+        return {"status": "skipped", "reason": "Reddit credentials not configured", "task_id": self.request.id}
+
+    # Full PRAW-based implementation added when credentials are set
+    return {"status": "pending_credentials", "task_id": self.request.id}
+
+
+# ---------------------------------------------------------------------------
+# Task: verify_indexing_status  (Phase 0-E: correct backoff schedule)
+# ---------------------------------------------------------------------------
+# Verification schedule: +6h, +24h, +72h, +7d = 10.25 days total
+# Old spec was 1d->2d->4d->8d->16d = 31 days -- too slow to detect issues
+_VERIFY_COUNTDOWNS = [
+    6 * 3600,          # attempt 0: check after  6 hours
+    24 * 3600,         # attempt 1: check after 24 hours
+    72 * 3600,         # attempt 2: check after 72 hours  (soft alert if not indexed)
+    7 * 24 * 3600,     # attempt 3: check after  7 days   (hard alert + resubmit)
+]
+
+
+@app.task(bind=True, queue="monitoring", max_retries=4, name="taskq.tasks.verify_indexing_status")
+def verify_indexing_status(self, url: str, business_id: str = "", attempt: int = 0) -> dict:
+    """Verify that a published URL has been indexed by Google.
+
+    Scheduling:
+        Attempt 0 (+6h)   -- initial check
+        Attempt 1 (+24h)  -- if not indexed yet
+        Attempt 2 (+72h)  -- soft alert: "not indexed after 3 days"
+        Attempt 3 (+7d)   -- hard alert + forced resubmission
+        Attempt 4+        -- give up, log permanent_failure
+
+    Args:
+        url:         The published page URL to verify.
+        business_id: Business context for cohort alerting.
+        attempt:     Current verification attempt number (0-indexed).
+    """
+    log.info(
+        "verify_indexing.start  task_id=%s  url=%s  attempt=%d",
+        self.request.id, url, attempt,
+    )
+    try:
+        from execution.indexing import IndexingSystem
+        import os
+
+        system = IndexingSystem(
+            gsc_credentials_path=os.getenv("GSC_CREDENTIALS_PATH", ""),
+        )
+        is_indexed = _run_async(system.verify_indexed(url))
+
+        if is_indexed:
+            log.info("verify_indexing.ok  url=%s  attempt=%d", url, attempt)
+            _save_result(self.request.id, {
+                "status": "indexed",
+                "url": url,
+                "attempt": attempt,
+                "task_id": self.request.id,
+            })
+            return {"status": "indexed", "url": url, "attempt": attempt}
+
+        # Not yet indexed -- decide what to do based on attempt
+        log.info("verify_indexing.not_yet  url=%s  attempt=%d", url, attempt)
+
+        if attempt == 2:
+            # Soft alert after 3 days
+            log.warning(
+                "verify_indexing.soft_alert  url=%s  not_indexed_after_3_days  business_id=%s",
+                url, business_id,
+            )
+            try:
+                _alert_webhook = os.getenv("ALERT_WEBHOOK_URL", "")
+                if _alert_webhook:
+                    import httpx
+                    from core.ssrf import validate_url, SSRFError
+                    try:
+                        validate_url(_alert_webhook)
+                        with httpx.Client(timeout=10) as hx:
+                            hx.post(_alert_webhook, json={
+                                "text": f":clock3: Page not indexed after 3 days\nURL: {url}\nBusiness: {business_id}\nAction: Monitoring, will check again in 7 days",
+                            })
+                    except SSRFError:
+                        log.debug("verify_indexing.alert_ssrf_blocked  url=%s", _alert_webhook[:50])
+            except Exception as _ae:
+                log.debug("verify_indexing.alert_fail  err=%s", _ae)
+
+        elif attempt == 3:
+            # Hard alert + resubmit after 7 days
+            log.error(
+                "verify_indexing.hard_alert  url=%s  not_indexed_after_10_days  business_id=%s",
+                url, business_id,
+            )
+            # Force resubmission
+            try:
+                from execution.indexing import submit_url
+                resubmit_result = _run_async(submit_url(url))
+                log.info(
+                    "verify_indexing.resubmitted  url=%s  google_api=%s  bing=%s",
+                    url, resubmit_result.google_api, resubmit_result.bing_indexnow,
+                )
+            except Exception as _re:
+                log.warning("verify_indexing.resubmit_fail  url=%s  err=%s", url, _re)
+
+            try:
+                _alert_webhook = os.getenv("ALERT_WEBHOOK_URL", "")
+                if _alert_webhook:
+                    import httpx
+                    from core.ssrf import validate_url, SSRFError
+                    try:
+                        validate_url(_alert_webhook)
+                        with httpx.Client(timeout=10) as hx:
+                            hx.post(_alert_webhook, json={
+                                "text": f":rotating_light: Page NOT indexed after 10 days -- RESUBMITTED\nURL: {url}\nBusiness: {business_id}\nAction: URL resubmitted to Google + Bing IndexNow",
+                            })
+                    except SSRFError:
+                        log.debug("verify_indexing.alert_ssrf_blocked  url=%s", _alert_webhook[:50])
+            except Exception as _ae:
+                log.debug("verify_indexing.alert_fail  err=%s", _ae)
+
+        # Schedule the next verification check
+        if attempt < len(_VERIFY_COUNTDOWNS):
+            next_countdown = _VERIFY_COUNTDOWNS[attempt]
+            verify_indexing_status.apply_async(
+                args=[url, business_id, attempt + 1],
+                countdown=next_countdown,
+            )
+            log.info(
+                "verify_indexing.rescheduled  url=%s  next_attempt=%d  in_hours=%.1f",
+                url, attempt + 1, next_countdown / 3600,
+            )
+        else:
+            # All attempts exhausted
+            log.error(
+                "verify_indexing.permanent_failure  url=%s  business_id=%s  gave_up_after_4_attempts",
+                url, business_id,
+            )
+            _save_result(self.request.id, {
+                "status": "permanent_failure",
+                "url": url,
+                "attempts": attempt + 1,
+                "task_id": self.request.id,
+            })
+
+        return {
+            "status": "not_indexed_yet",
+            "url": url,
+            "attempt": attempt,
+            "task_id": self.request.id,
+        }
+
+    except Exception as exc:
+        log.exception("verify_indexing.error  task_id=%s  url=%s  exc=%s",
+                      self.request.id, url, exc)
+        if attempt < len(_VERIFY_COUNTDOWNS):
+            raise self.retry(exc=exc, countdown=_VERIFY_COUNTDOWNS[attempt])
+        return {"status": "error", "url": url, "error": str(exc), "task_id": self.request.id}

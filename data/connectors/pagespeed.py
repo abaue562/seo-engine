@@ -130,15 +130,22 @@ class PageSpeedConnector:
         params: dict[str, str] = {
             "url":      url,
             "strategy": strategy,
-            "category": "performance,seo,accessibility,best-practices",
+            
             "locale":   "en",
         }
+        # PSI v5: category must be a repeated param, not comma-joined
+        list_params = list(params.items()) + [
+            ("category", "performance"),
+            ("category", "seo"),
+            ("category", "accessibility"),
+            ("category", "best-practices"),
+        ]
         if self.api_key:
-            params["key"] = self.api_key
+            list_params.append(("key", self.api_key))
 
         try:
             async with httpx.AsyncClient(timeout=60) as client:
-                resp = await client.get(_API_BASE, params=params)
+                resp = await client.get(_API_BASE, params=list_params)
                 resp.raise_for_status()
                 data = resp.json()
         except Exception as e:

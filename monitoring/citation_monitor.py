@@ -214,53 +214,29 @@ class CitationMonitor:
     ) -> CitationResult:
         """Test if business is cited in Perplexity AI answer for a query.
 
-        Uses Perplexity API (sonar model) if API key is available,
-        otherwise falls back to scraping (fragile).
+        Routes through core.browser_llm.call_perplexity (Playwright browser,
+        no API key required).  Eliminates PERPLEXITY_API_KEY dependency.
         """
-        perplexity_key = os.getenv("PERPLEXITY_API_KEY", "")
         snippet = ""
         cited = False
         citation_rank = 0
+        citations_list: list[str] = []
 
-        if perplexity_key:
-            try:
-                import httpx
-                async with httpx.AsyncClient(timeout=30) as client:
-                    resp = await client.post(
-                        "https://api.perplexity.ai/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {perplexity_key}",
-                            "Content-Type":  "application/json",
-                        },
-                        json={
-                            "model":    "sonar-pro",
-                            "messages": [
-                                {"role": "system", "content": "You are a helpful assistant. Answer concisely and cite sources."},
-                                {"role": "user",   "content": query},
-                            ],
-                            "return_citations": True,
-                        },
-                    )
-                    resp.raise_for_status()
-                    data = resp.json()
-                    content  = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                    citations = data.get("citations", [])
-
-                    snippet = content[:500]
-                    cited   = _name_in_text(business_name, content)
-                    for i, cit in enumerate(citations, 1):
-                        if _name_in_text(business_name, str(cit)):
-                            citation_rank = i
-                            break
-
-                    log.debug(
-                        "citation.perplexity  query=%r  cited=%s  rank=%d",
-                        query[:50], cited, citation_rank,
-                    )
-            except Exception as e:
-                log.warning("citation.perplexity_api_fail  query=%r  err=%s", query[:50], e)
-        else:
-            log.debug("citation.perplexity_skip  reason=no_api_key  query=%r", query[:50])
+        try:
+            from core.browser_llm import call_perplexity as _pplx
+            answer, citations_list = await _pplx(query, wait_seconds=8.0)
+            snippet = answer[:500]
+            cited = _name_in_text(business_name, answer)
+            for i, url in enumerate(citations_list, 1):
+                if _name_in_text(business_name, url):
+                    citation_rank = i
+                    break
+            log.debug(
+                "citation.perplexity_browser  query=%r  cited=%s  rank=%d  citations=%d",
+                query[:50], cited, citation_rank, len(citations_list),
+            )
+        except Exception as e:
+            log.warning("citation.perplexity_browser_fail  query=%r  err=%s", query[:50], e)
 
         competitor_cited = any(_name_in_text(comp, snippet) for comp in competitor_names)
 
@@ -274,7 +250,6 @@ class CitationMonitor:
             competitor_cited=competitor_cited,
             timestamp=datetime.now(tz=timezone.utc).isoformat(),
         )
-
     async def test_chatgpt(
         self,
         query: str,

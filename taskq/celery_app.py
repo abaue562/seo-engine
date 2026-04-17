@@ -59,7 +59,7 @@ app.conf.update(
     task_reject_on_worker_lost=True,
 
     # Result expiry — keep results for 7 days
-    result_expires=604800,
+    result_expires=86400,  # 24h TTL (P1 bloat fix)
 
     # Worker concurrency / prefetch
     worker_prefetch_multiplier=1,
@@ -108,6 +108,7 @@ app.conf.update(
         "taskq.tasks.submit_sitemap": {"queue": "execution"},
         "taskq.tasks.run_gbp_posts":          {"queue": "execution"},
         "taskq.tasks.run_citation_builder":   {"queue": "execution"},
+        "taskq.tasks.run_wikidata_sync":       {"queue": "analysis"},
         # New Phase 2-14 tasks
         "taskq.tasks.run_programmatic_batch": {"queue": "execution"},
         "taskq.tasks.run_haro_check":         {"queue": "execution"},
@@ -209,6 +210,11 @@ app.conf.update(
             "schedule": 604800,
             "options": {"queue": "execution"},
         },
+        "run-wikidata-sync": {
+            "task": "taskq.tasks.run_wikidata_sync",
+            "schedule": 604800,          # 7 days
+            "options": {"queue": "analysis"},
+        },
         "run-gbp-posts": {
             "task": "taskq.tasks.run_gbp_posts",
             "schedule": 604800,         # 7 days
@@ -234,6 +240,42 @@ app.conf.update(
             "task": "taskq.tasks.sync_entity_knowledge_graph",
             "schedule": 43200,          # 12 hours — entity graph sync
             "options": {"queue": "analysis"},
+        },
+        "run-programmatic-batch": {
+            "task": "taskq.tasks.run_programmatic_batch",
+            "schedule": 86400,          # 24 hours — publish 5 programmatic pages/day
+            "options": {"queue": "execution"},
+        },
+
+        "run-freshness-injector": {
+            "task": "taskq.tasks.inject_content_freshness",
+            "schedule": 604800,          # 7 days — update stale articles with new stats
+            "options": {"queue": "execution"},
+        },
+        "run-medium-syndication": {
+            "task": "taskq.tasks.syndicate_to_medium",
+            "schedule": 86400,           # daily — syndicate articles >7 days old
+            "options": {"queue": "execution"},
+        },
+        "run-reddit-answer-queue": {
+            "task": "taskq.tasks.run_reddit_answer_agent",
+            "schedule": 604800,          # 7 days — find & queue Reddit answers for review
+            "options": {"queue": "execution"},
+        },
+        "run-gsc-data-pull": {
+            "task": "taskq.tasks.pull_gsc_data",
+            "schedule": 86400,           # daily — pull GSC clicks/impressions/CTR
+            "options": {"queue": "analysis"},
+        },
+        "run-review-solicitation": {
+            "task": "taskq.tasks.send_review_requests",
+            "schedule": 86400,           # daily — send post-job review request emails
+            "options": {"queue": "execution"},
+        },
+        "run-citation-batch": {
+            "task": "taskq.tasks.run_citation_builder",
+            "schedule": 604800,          # 7 days — submit next 3 pending citation directories
+            "options": {"queue": "execution"},
         },
         "competitor-content-alerts": {
             "task": "taskq.tasks.competitor_content_alerts",
@@ -304,3 +346,21 @@ def handle_task_failure(sender=None, task_id=None, exception=None,
         )
     except Exception as notify_err:
         _log.warning("dead_letter.notify_fail  err=%s", notify_err)
+
+
+# Distributed trace propagation (P1-A)
+try:
+    from core.tracing import setup_celery_tracing
+    setup_celery_tracing(app)
+except Exception as _te:
+    import logging
+    logging.getLogger(__name__).warning("tracing.setup_fail  err=%s", _te)
+
+
+# Worker observability metrics (P1-G)
+try:
+    from core.metrics import setup_celery_metrics
+    setup_celery_metrics(app)
+except Exception as _me:
+    import logging
+    logging.getLogger(__name__).warning("metrics.setup_fail  err=%s", _me)

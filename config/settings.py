@@ -160,3 +160,6 @@ OLLAMA_URL            = os.getenv("OLLAMA_URL",            "http://localhost:114
 # Site URL (used for llms.txt generation, sitemaps, canonical URLs)
 SITE_URL = os.getenv("SITE_URL", "")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "aion@gethubed.com")
+
+# Database (PostgreSQL multi-tenant)
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://seo_app:seo_Bbl_2026_secure@localhost:5432/seo_engine")

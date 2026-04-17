@@ -49,7 +49,7 @@ async def crawl_page(url: str, timeout: int = 15000) -> dict:
             await page.wait_for_timeout(2000)
 
             # Extract everything via JS evaluation
-            data = await page.evaluate("""() => {
+            data = await page.evaluate(r"""() => {
                 const doc = document;
 
                 // Title
