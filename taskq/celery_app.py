@@ -487,6 +487,11 @@ app.conf.beat_schedule.update({
         "schedule": crontab(hour=7, minute=0, day_of_week="1,4"),
         "kwargs": {"business_id": ""},
     },
+    "entity-sweep-weekly": {
+        "task": "taskq.tasks.run_entity_sweep",
+        "schedule": crontab(hour=5, minute=0, day_of_week=3),
+        "kwargs": {"business_id": ""},
+    },
     "eeat-sweep-weekly": {
         "task": "taskq.tasks.run_eeat_sweep",
         "schedule": crontab(hour=11, minute=0, day_of_week=2),

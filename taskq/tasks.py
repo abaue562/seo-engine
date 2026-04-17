@@ -3591,3 +3591,17 @@ def run_backlink_health_check(self, business_id: str = '') -> dict:
     except Exception as exc:
         log.exception('run_backlink_health_check.error  task_id=%s', self.request.id)
         return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
+
+
+@app.task(bind=True, queue='monitoring', max_retries=1, name='taskq.tasks.run_entity_sweep')
+def run_entity_sweep(self, business_id: str = '') -> dict:
+    log.info('run_entity_sweep.start  task_id=%s  biz=%s', self.request.id, business_id)
+    try:
+        from core.brand_entity import run_entity_sweep as _sweep
+        result = _sweep(business_id)
+        _save_result(self.request.id, {'status': 'success', **result, 'task_id': self.request.id})
+        log.info('run_entity_sweep.done  score=%d  mentions=%d', result.get('entity_score', 0), result.get('mentions_found', 0))
+        return {'status': 'success', **result, 'task_id': self.request.id}
+    except Exception as exc:
+        log.exception('run_entity_sweep.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}

@@ -83,6 +83,8 @@ from api.geo_routes import router as geo_router
 app.include_router(geo_router)
 from api.eeat_routes import router as eeat_router
 from api.backlink_routes import router as backlink_router
+from api.brand_routes import router as brand_router
+app.include_router(brand_router)
 app.include_router(backlink_router)
 app.include_router(eeat_router)
 from starlette.middleware.base import BaseHTTPMiddleware
