@@ -84,6 +84,8 @@ app.include_router(geo_router)
 from api.eeat_routes import router as eeat_router
 from api.backlink_routes import router as backlink_router
 from api.brand_routes import router as brand_router
+from api.crawl_routes import router as crawl_router
+app.include_router(crawl_router)
 app.include_router(brand_router)
 app.include_router(backlink_router)
 app.include_router(eeat_router)

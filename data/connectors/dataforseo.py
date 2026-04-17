@@ -36,18 +36,36 @@ class DataForSEOClient:
         cached = _redis.get(cache_key)
         if cached:
             return json.loads(cached)
-        payload = [{"keywords": keywords[:1000], "location_code": location_code, "language_code": "en"}]
-        raw = self._post("/v3/keywords_data/google_ads/search_volume/live", payload)
         items = []
-        for task in raw.get("tasks", []):
-            for result in (task.get("result") or []):
-                items.append({
-                    "keyword": result.get("keyword"),
-                    "search_volume": result.get("search_volume", 0),
-                    "competition": result.get("competition", 0),
-                    "cpc": result.get("cpc", 0),
-                    "difficulty": result.get("keyword_difficulty", 0),
-                })
+        # Try DataForSEO first
+        if self.login and self.password:
+            try:
+                payload = [{"keywords": keywords[:1000], "location_code": location_code, "language_code": "en"}]
+                raw = self._post("/v3/keywords_data/google_ads/search_volume/live", payload)
+                for task in raw.get("tasks", []):
+                    for result in (task.get("result") or []):
+                        items.append({
+                            "keyword": result.get("keyword"),
+                            "search_volume": result.get("search_volume", 0),
+                            "competition": result.get("competition", 0),
+                            "cpc": result.get("cpc", 0),
+                            "difficulty": result.get("keyword_difficulty", 0),
+                        })
+            except Exception:
+                log.warning("dataforseo.keyword_data: API failed, using self-hosted fallback")
+        # Self-hosted fallback
+        if not items:
+            try:
+                from core.keyword_intel import research_keyword, estimate_volume
+                from core.serp_scraper import estimate_keyword_difficulty
+                for kw in keywords[:50]:
+                    vol = estimate_volume(kw, tenant)
+                    diff = estimate_keyword_difficulty(kw).get("difficulty", 50)
+                    items.append({"keyword": kw, "search_volume": vol, "competition": diff / 100,
+                                  "cpc": 0, "difficulty": diff, "source": "self_hosted"})
+                log.info("dataforseo.keyword_data: self-hosted fallback  keywords=%d", len(items))
+            except Exception:
+                log.exception("dataforseo.keyword_data: self-hosted fallback failed")
         if items:
             _redis.setex(cache_key, 86400 * 7, json.dumps(items))
         self._meter(tenant)
@@ -86,6 +104,28 @@ class DataForSEOClient:
                 set_cached_serp(keyword, str(location_code), result)
             except Exception:
                 pass
+        # Self-hosted fallback
+        if not result:
+            try:
+                from core.serp_scraper import scrape_serp
+                serp_data = scrape_serp(keyword)
+                organic = serp_data.get("organic", [])
+                result = {
+                    "keyword": keyword,
+                    "items": [{"rank_group": r["position"], "domain": r["domain"],
+                               "url": r["url"], "title": r["title"], "description": r["snippet"]}
+                              for r in organic],
+                    "paa_count": len(serp_data.get("paa", [])),
+                    "ad_count": 0,
+                    "has_local_pack": False,
+                    "source": "self_hosted_bing",
+                }
+                if result["items"]:
+                    _redis.setex(cache_key, 86400, json.dumps(result))
+                log.info("dataforseo.serp_snapshot: self-hosted fallback  keyword=%s  items=%d",
+                         keyword, len(result.get("items", [])))
+            except Exception:
+                log.exception("dataforseo.serp_snapshot: self-hosted fallback failed")
         self._meter(tenant)
         log.info("dataforseo.serp_snapshot  keyword=%s  items=%d", keyword, len(result.get("items", [])))
         return result
@@ -103,5 +143,25 @@ class DataForSEOClient:
                 result = {"domain": domain, "backlinks": r.get("backlinks", 0), "referring_domains": r.get("referring_domains", 0), "domain_rank": r.get("rank", 0)}
         if result:
             _redis.setex(cache_key, 86400 * 3, json.dumps(result))
+        # Self-hosted fallback
+        if not result:
+            try:
+                from core.backlink_crawler import compute_domain_authority, _conn as _bl_conn
+                da_data = compute_domain_authority(domain)
+                with _bl_conn() as c:
+                    inbound = c.execute(
+                        "SELECT COUNT(*), COUNT(DISTINCT source_domain) FROM link_graph WHERE target_domain=?", [domain]
+                    ).fetchone()
+                result = {
+                    "domain": domain,
+                    "backlinks": inbound[0] if inbound else 0,
+                    "referring_domains": inbound[1] if inbound else 0,
+                    "domain_rank": da_data.get("da_score", 0),
+                    "source": "self_hosted_crawl",
+                }
+                log.info("dataforseo.backlink_summary: self-hosted fallback  domain=%s  da=%d",
+                         domain, result["domain_rank"])
+            except Exception:
+                log.exception("dataforseo.backlink_summary: self-hosted fallback failed")
         self._meter(tenant)
         return result

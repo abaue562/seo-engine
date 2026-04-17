@@ -487,6 +487,21 @@ app.conf.beat_schedule.update({
         "schedule": crontab(hour=7, minute=0, day_of_week="1,4"),
         "kwargs": {"business_id": ""},
     },
+    "serp-rank-sweep-daily": {
+        "task": "taskq.tasks.run_serp_rank_sweep",
+        "schedule": crontab(hour=4, minute=0),
+        "kwargs": {"business_id": ""},
+    },
+    "competitor-crawl-weekly": {
+        "task": "taskq.tasks.run_competitor_crawl",
+        "schedule": crontab(hour=3, minute=0, day_of_week=2),
+        "kwargs": {"business_id": ""},
+    },
+    "keyword-opportunity-weekly": {
+        "task": "taskq.tasks.run_keyword_opportunity_sweep",
+        "schedule": crontab(hour=3, minute=30, day_of_week=2),
+        "kwargs": {"business_id": ""},
+    },
     "entity-sweep-weekly": {
         "task": "taskq.tasks.run_entity_sweep",
         "schedule": crontab(hour=5, minute=0, day_of_week=3),

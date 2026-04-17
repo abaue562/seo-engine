@@ -3605,3 +3605,66 @@ def run_entity_sweep(self, business_id: str = '') -> dict:
     except Exception as exc:
         log.exception('run_entity_sweep.error  task_id=%s', self.request.id)
         return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
+
+
+@app.task(bind=True, queue='monitoring', max_retries=1, name='taskq.tasks.run_serp_rank_sweep')
+def run_serp_rank_sweep(self, business_id: str = '') -> dict:
+    log.info('run_serp_rank_sweep.start  task_id=%s  biz=%s', self.request.id, business_id)
+    try:
+        import json
+        from pathlib import Path
+        all_biz = json.loads(Path('data/storage/businesses.json').read_text())
+        biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+        biz = next((b for b in biz_list if b.get('id') == business_id or b.get('business_id') == business_id), {})
+        domain = biz.get('domain', '').replace('https://', '').replace('http://', '').rstrip('/')
+        location = biz.get('city', '')
+        import sqlite3
+        keywords = [r[0] for r in sqlite3.connect('data/storage/seo_engine.db').execute(
+            'SELECT DISTINCT keyword FROM ranking_history WHERE business_id=? LIMIT 30', [business_id]).fetchall()]
+        if not keywords:
+            keywords = biz.get('target_keywords', [])[:20]
+        from core.serp_scraper import run_rank_tracking_sweep
+        result = run_rank_tracking_sweep(business_id, keywords, domain, location)
+        _save_result(self.request.id, {'status': 'success', **result, 'task_id': self.request.id})
+        log.info('run_serp_rank_sweep.done  keywords=%d  top3=%d', result.get('keywords_checked', 0), result.get('top_3', 0))
+        return {'status': 'success', **result, 'task_id': self.request.id}
+    except Exception as exc:
+        log.exception('run_serp_rank_sweep.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
+
+
+@app.task(bind=True, queue='monitoring', max_retries=1, name='taskq.tasks.run_competitor_crawl')
+def run_competitor_crawl(self, business_id: str = '') -> dict:
+    log.info('run_competitor_crawl.start  task_id=%s  biz=%s', self.request.id, business_id)
+    try:
+        from core.backlink_crawler import crawl_competitor_suite
+        result = crawl_competitor_suite(business_id)
+        _save_result(self.request.id, {'status': 'success', **result, 'task_id': self.request.id})
+        log.info('run_competitor_crawl.done  comps=%d  gaps=%d', result.get('competitors_crawled', 0), result.get('backlink_gaps_found', 0))
+        return {'status': 'success', **result, 'task_id': self.request.id}
+    except Exception as exc:
+        log.exception('run_competitor_crawl.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
+
+
+@app.task(bind=True, queue='monitoring', max_retries=1, name='taskq.tasks.run_keyword_opportunity_sweep')
+def run_keyword_opportunity_sweep(self, business_id: str = '') -> dict:
+    log.info('run_keyword_opportunity_sweep.start  task_id=%s  biz=%s', self.request.id, business_id)
+    try:
+        import json
+        from pathlib import Path
+        all_biz = json.loads(Path('data/storage/businesses.json').read_text())
+        biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+        biz = next((b for b in biz_list if b.get('id') == business_id or b.get('business_id') == business_id), {})
+        niche = biz.get('niche', biz.get('service_type', 'home services'))
+        location = biz.get('city', '')
+        from core.keyword_intel import get_keyword_opportunities
+        opportunities = get_keyword_opportunities(business_id, niche, location, limit=20)
+        result = {'status': 'success', 'opportunities_found': len(opportunities),
+                  'top_opportunities': opportunities[:5], 'task_id': self.request.id}
+        _save_result(self.request.id, result)
+        log.info('run_keyword_opportunity_sweep.done  found=%d', len(opportunities))
+        return result
+    except Exception as exc:
+        log.exception('run_keyword_opportunity_sweep.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
