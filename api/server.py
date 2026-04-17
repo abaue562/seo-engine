@@ -74,6 +74,9 @@ app = FastAPI(
 if lead_router is not None:
     app.include_router(lead_router, prefix="/conversion")
 
+
+from api.tenant_routes import router as tenant_router
+app.include_router(tenant_router)
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response
