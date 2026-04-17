@@ -3732,3 +3732,70 @@ def run_citation_content_sweep_task(self, business_id: str = "") -> dict:
     except Exception as exc:
         log.exception("run_citation_content_sweep.error  task_id=%s", self.request.id)
         return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=2, name="taskq.tasks.run_cta_optimize")
+def run_cta_optimize(self, business_id: str = "") -> dict:
+    """Weekly: auto-optimize CTA variants — pause losers, keep winners."""
+    log.info("run_cta_optimize.start  task_id=%s  business_id=%s", self.request.id, business_id)
+    try:
+        import json
+        from core.cta_optimizer import auto_optimize_cta
+        biz_ids = []
+        if business_id:
+            biz_ids = [business_id]
+        else:
+            try:
+                all_biz = json.loads(open("data/storage/businesses.json").read())
+                biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+                biz_ids = [b.get("id", b.get("business_id", "")) for b in biz_list if b.get("id") or b.get("business_id")]
+            except Exception:
+                pass
+        results = []
+        for bid in biz_ids:
+            if not bid:
+                continue
+            r = auto_optimize_cta(bid)
+            results.append({"business_id": bid, **r})
+        log.info("run_cta_optimize.done  task_id=%s  count=%d", self.request.id, len(results))
+        return {"status": "ok", "results": results, "task_id": self.request.id}
+    except Exception as exc:
+        log.exception("run_cta_optimize.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=2, name="taskq.tasks.run_lead_report")
+def run_lead_report(self, business_id: str = "") -> dict:
+    """Weekly: compile lead stats and push hot leads to CRM."""
+    log.info("run_lead_report.start  task_id=%s  business_id=%s", self.request.id, business_id)
+    try:
+        import json
+        from core.lead_capture import get_leads, get_lead_stats, push_to_crm
+        biz_ids = []
+        if business_id:
+            biz_ids = [business_id]
+        else:
+            try:
+                all_biz = json.loads(open("data/storage/businesses.json").read())
+                biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+                biz_ids = [b.get("id", b.get("business_id", "")) for b in biz_list if b.get("id") or b.get("business_id")]
+            except Exception:
+                pass
+        results = []
+        for bid in biz_ids:
+            if not bid:
+                continue
+            stats = get_lead_stats(bid, days=7)
+            # Push any unpushed hot leads to CRM
+            hot_leads = get_leads(bid, days=7, limit=100)
+            pushed = 0
+            for lead in hot_leads:
+                if lead.get("qualified_score", 0) >= 70 and not lead.get("crm_pushed"):
+                    push_to_crm(bid, lead["id"], lead)
+                    pushed += 1
+            results.append({"business_id": bid, "stats": stats, "crm_pushed": pushed})
+        log.info("run_lead_report.done  task_id=%s  count=%d", self.request.id, len(results))
+        return {"status": "ok", "results": results, "task_id": self.request.id}
+    except Exception as exc:
+        log.exception("run_lead_report.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}

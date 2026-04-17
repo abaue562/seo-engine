@@ -530,3 +530,15 @@ app.conf.beat_schedule.update({
         'kwargs': {'business_id': ''},
     },
 })
+app.conf.beat_schedule.update({
+    "cta-optimize-weekly": {
+        "task": "taskq.tasks.run_cta_optimize",
+        "schedule": crontab(hour=8, minute=0, day_of_week=1),
+        "kwargs": {"business_id": ""},
+    },
+    "lead-report-weekly": {
+        "task": "taskq.tasks.run_lead_report",
+        "schedule": crontab(hour=8, minute=30, day_of_week=1),
+        "kwargs": {"business_id": ""},
+    },
+})
