@@ -166,7 +166,7 @@ def generate_faq_hub(
     facts: list[dict],
 ) -> dict:
     """Generate a definitive FAQ hub with direct answers AI engines quote."""
-    facts_context = json.dumps(facts[:15], indent=2)
+    facts_context = json.dumps(facts[:8], indent=2)
     year = datetime.now().year
     title = f"{service} FAQ: {year} Answers for {location} Homeowners"
     slug = _slug(f"{service}-faq-{location}-{year}")
@@ -192,7 +192,7 @@ Requirements:
 
     try:
         from core.claude import call_claude
-        html = call_claude(prompt, max_tokens=3500)
+        html = call_claude(prompt, max_tokens=2000)
         html = re.sub(r'^```html\s*', '', html.strip())
         html = re.sub(r'```$', '', html.strip())
     except Exception:
@@ -242,7 +242,7 @@ HTML only:"""
 
     try:
         from core.claude import call_claude
-        html = call_claude(prompt, max_tokens=4000)
+        html = call_claude(prompt, max_tokens=2200)
         html = re.sub(r'^```html\s*', '', html.strip())
         html = re.sub(r'```$', '', html.strip())
     except Exception:

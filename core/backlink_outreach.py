@@ -190,12 +190,12 @@ def send_outreach(
 
     try:
         from core.email_sender import EmailSender
-        sender = EmailSender(business_id)
-        sender.send(
+        sender = EmailSender()
+        sender.send_transactional(
             to=to_email,
             subject=email["subject"],
-            html_body=f"<p>{email['body'].replace(chr(10), '<br>')}</p>",
-            from_name=sender_name,
+            html=f"<p>{email['body'].replace(chr(10), '<br>')}</p>",
+            from_addr=sender_email,
         )
         status = "sent"
     except Exception:
