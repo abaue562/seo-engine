@@ -55,17 +55,33 @@ async def geo_score(url: str):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+
 @router.get("/citation-gaps")
-async def citation_gaps(business_id: str, limit: int = 20):
+async def citation_gaps(business_id: str, limit: int = 20, engine: str = ""):
     from core.ai_answer_monitor import get_citation_gaps
-    gaps = get_citation_gaps(business_id, limit)
+    gaps = get_citation_gaps(business_id, limit, engine)
     return {"business_id": business_id, "gaps": gaps, "count": len(gaps)}
 
 @router.get("/citation-wins")
-async def citation_wins(business_id: str):
+async def citation_wins(business_id: str, engine: str = ""):
     from core.ai_answer_monitor import get_citation_wins
-    wins = get_citation_wins(business_id)
+    wins = get_citation_wins(business_id, engine)
     return {"business_id": business_id, "wins": wins, "count": len(wins)}
+
+@router.get("/citation-compare")
+async def citation_compare(business_id: str, keyword: str):
+    from core.ai_answer_monitor import get_engine_comparison
+    return {"comparisons": get_engine_comparison(business_id, keyword)}
+
+@router.post("/monitor-sweep")
+async def monitor_sweep(req: dict):
+    from core.ai_answer_monitor import run_keyword_monitor
+    result = run_keyword_monitor(
+        business_id=req.get("business_id", ""),
+        engines=req.get("engines", ["perplexity", "grok", "claude"]),
+        use_playwright=req.get("use_playwright", True),
+    )
+    return result
 
 @router.get("/llms-txt")
 async def get_llms_txt(business_id: str):

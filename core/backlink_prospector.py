@@ -393,3 +393,120 @@ def get_backlink_stats(business_id: str) -> dict:
         "prospects_in_outreach": prospects_contacted,
         "won": won,
     }
+
+
+def find_resource_pages_playwright(business_id: str, niche: str, your_domain: str, limit: int = 20) -> list:
+    """
+    Use Firecrawl/Playwright to find resource pages and broken-link opportunities.
+    Searches Google for 'niche + "useful resources"' via AION GPT-Researcher,
+    then scrapes each result for outbound links.
+    """
+    try:
+        from core.aion_bridge import aion
+    except Exception:
+        log.warning("find_resource_pages_playwright: aion_bridge unavailable")
+        return []
+
+    prospects = []
+    queries = [
+        f"{niche} useful resources links",
+        f"{niche} recommended sites",
+        f"best {niche} websites resources",
+    ]
+
+    for query in queries[:2]:
+        try:
+            report = aion.gpt_research(query)
+            if not report:
+                continue
+            import re
+            urls = re.findall(r'https?://[^\s\)\]\'"<>]+', report)
+            urls = [u for u in urls if your_domain not in u and len(u) < 200][:10]
+
+            for url in urls:
+                md = aion.firecrawl_scrape(url)
+                if not md:
+                    continue
+                # Check if this page links out a lot (resource page signal)
+                outbound = re.findall(r'https?://[^\s\)\]\'"<>]+', md)
+                if len(outbound) < 5:
+                    continue
+                p = add_prospect(
+                    business_id=business_id,
+                    opportunity_type="resource_page",
+                    target_url=url,
+                    domain_rating=0,
+                    page_title=md[:80].strip(),
+                    pitch_angle=f"Resource page with {len(outbound)} outbound links — request inclusion",
+                    anchor_context=f"Found via '{query}' research",
+                )
+                prospects.append(p)
+                if len(prospects) >= limit:
+                    break
+        except Exception:
+            log.exception("find_resource_pages_playwright: query=%s", query)
+
+        if len(prospects) >= limit:
+            break
+
+    log.info("find_resource_pages_playwright  biz=%s  found=%d", business_id, len(prospects))
+    return prospects
+
+
+def find_broken_link_opportunities(business_id: str, niche: str, limit: int = 15) -> list:
+    """
+    Use Firecrawl to scrape high-authority pages in the niche and
+    identify broken outbound links (404s) as replacement opportunities.
+    """
+    try:
+        from core.aion_bridge import aion
+        import urllib.request, urllib.error, re
+    except Exception:
+        log.warning("find_broken_link_opportunities: dependencies unavailable")
+        return []
+
+    prospects = []
+    try:
+        report = aion.gpt_research(f"top {niche} guide articles authoritative 2024 2025")
+        if not report:
+            return []
+        urls = re.findall(r'https?://[^\s\)\]\'"<>]+', report)[:8]
+
+        for page_url in urls:
+            try:
+                md = aion.firecrawl_scrape(page_url)
+                if not md:
+                    continue
+                outbound = list(set(re.findall(r'https?://[^\s\)\]\'"<>]{10,200}', md)))
+                for link in outbound[:30]:
+                    try:
+                        req = urllib.request.Request(
+                            link, headers={"User-Agent": "SEOEngine-LinkChecker/1.0"},
+                            method="HEAD"
+                        )
+                        urllib.request.urlopen(req, timeout=5)
+                    except urllib.error.HTTPError as e:
+                        if e.code in (404, 410, 403):
+                            p = add_prospect(
+                                business_id=business_id,
+                                opportunity_type="broken_link",
+                                target_url=page_url,
+                                domain_rating=0,
+                                page_title=md[:80].strip(),
+                                anchor_context=f"Broken link to {link} (HTTP {e.code})",
+                                pitch_angle=f"Found a broken link on this page — offer your content as replacement",
+                            )
+                            prospects.append(p)
+                            if len(prospects) >= limit:
+                                break
+                    except Exception:
+                        pass
+                if len(prospects) >= limit:
+                    break
+            except Exception:
+                log.exception("broken_link: failed scraping %s", page_url)
+    except Exception:
+        log.exception("find_broken_link_opportunities  biz=%s", business_id)
+
+    log.info("find_broken_link_opportunities  biz=%s  found=%d", business_id, len(prospects))
+    return prospects
