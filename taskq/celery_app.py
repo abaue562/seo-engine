@@ -433,16 +433,33 @@ app.conf.beat_schedule.update({
 
 # Doc 09 beat schedule additions
 app.conf.beat_schedule.update({
-    health-score-daily: {
-        task: taskq.tasks.run_health_score_sweep,
-        schedule: crontab(hour=1, minute=0),
+    "health-score-daily": {
+        "task": "taskq.tasks.run_health_score_sweep",
+        "schedule": crontab(hour=1, minute=0),
     },
-    expansion-sweep-daily: {
-        task: taskq.tasks.run_expansion_sweep,
-        schedule: crontab(hour=2, minute=30),
+    "expansion-sweep-daily": {
+        "task": "taskq.tasks.run_expansion_sweep",
+        "schedule": crontab(hour=2, minute=30),
     },
-    case-study-scan-monthly: {
-        task: taskq.tasks.run_case_study_scan,
-        schedule: crontab(hour=3, minute=0, day_of_month=7),
+    "case-study-scan-monthly": {
+        "task": "taskq.tasks.run_case_study_scan",
+        "schedule": crontab(hour=3, minute=0, day_of_month=7),
+    },
+})
+
+
+# Doc 10 beat schedule additions
+app.conf.beat_schedule.update({
+    "outcome-snapshot-sweep-daily": {
+        "task": "taskq.tasks.run_outcome_snapshot_sweep",
+        "schedule": crontab(hour=0, minute=30),
+    },
+    "signal-layer-sweep-daily": {
+        "task": "taskq.tasks.run_signal_layer_sweep",
+        "schedule": crontab(hour=0, minute=45),
+    },
+    "ai-version-evaluation-monthly": {
+        "task": "taskq.tasks.run_ai_version_evaluation",
+        "schedule": crontab(hour=4, minute=0, day_of_month=20),
     },
 })

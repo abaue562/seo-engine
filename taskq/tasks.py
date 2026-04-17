@@ -3390,3 +3390,56 @@ def run_case_study_scan(self) -> dict:
     except Exception as exc:
         log.exception("run_case_study_scan.error  task_id=%s", self.request.id)
         return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+# Doc 10 tasks
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_outcome_snapshot_sweep")
+def run_outcome_snapshot_sweep(self) -> dict:
+    log.info("run_outcome_snapshot_sweep.start  task_id=%s", self.request.id)
+    try:
+        from core.content_provenance import get_corpus_stats
+        import sqlite3
+        stats = get_corpus_stats()
+        result = {"status": "success", "corpus_stats": stats, "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_outcome_snapshot_sweep.done  total=%d  with_90d=%d", stats.get("total_pages", 0), stats.get("pages_with_90d_outcome", 0))
+        return result
+    except Exception as exc:
+        log.exception("run_outcome_snapshot_sweep.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_signal_layer_sweep")
+def run_signal_layer_sweep(self) -> dict:
+    log.info("run_signal_layer_sweep.start  task_id=%s", self.request.id)
+    try:
+        from core.signal_layer import get_signal_stats
+        stats = get_signal_stats()
+        result = {"status": "success", "signal_stats": stats, "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_signal_layer_sweep.done  signals=%d  cohorts=%d", stats.get("total_signals", 0), stats.get("unique_cohorts", 0))
+        return result
+    except Exception as exc:
+        log.exception("run_signal_layer_sweep.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_ai_version_evaluation")
+def run_ai_version_evaluation(self) -> dict:
+    log.info("run_ai_version_evaluation.start  task_id=%s", self.request.id)
+    try:
+        from core.ai_version_registry import COMPONENTS, get_active_version, evaluate_version
+        results = []
+        for component in COMPONENTS:
+            active = get_active_version(component)
+            if active:
+                eval_result = evaluate_version(active["id"])
+                results.append(eval_result)
+        result = {"status": "success", "components_evaluated": len(results), "results": results, "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_ai_version_evaluation.done  evaluated=%d", len(results))
+        return result
+    except Exception as exc:
+        log.exception("run_ai_version_evaluation.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
