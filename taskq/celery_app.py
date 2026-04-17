@@ -389,3 +389,27 @@ try:
 except Exception as _me:
     import logging
     logging.getLogger(__name__).warning("metrics.setup_fail  err=%s", _me)
+
+
+# Doc 07 beat schedule additions
+app.conf.beat_schedule.update({
+    "hypothesis-generation-weekly": {
+        "task": "taskq.tasks.run_hypothesis_generation",
+        "schedule": crontab(hour=3, minute=0, day_of_week=1),
+        "kwargs": {"business_id": ""},
+    },
+    "tenant-strategy-monthly": {
+        "task": "taskq.tasks.run_tenant_strategy_update",
+        "schedule": crontab(hour=4, minute=0, day_of_month=1),
+        "kwargs": {"business_id": ""},
+    },
+    "competitor-exploit-weekly": {
+        "task": "taskq.tasks.run_competitor_exploit",
+        "schedule": crontab(hour=5, minute=0, day_of_week=2),
+        "kwargs": {"business_id": ""},
+    },
+    "threshold-tuning-monthly": {
+        "task": "taskq.tasks.run_threshold_tuning",
+        "schedule": crontab(hour=2, minute=0, day_of_month=15),
+    },
+})

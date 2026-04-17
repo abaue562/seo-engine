@@ -3191,3 +3191,95 @@ def run_competitor_tracking(self, business_id: str = "") -> dict:
     except Exception as exc:
         log.exception("run_competitor_tracking.error  task_id=%s", self.request.id)
         return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+# Doc 07 tasks
+
+@app.task(bind=True, queue="execution", max_retries=1, name="taskq.tasks.run_llm_judge_sample")
+def run_llm_judge_sample(self, business_id: str = "", content_html: str = "", keyword: str = "", intent: str = "informational") -> dict:
+    log.info("run_llm_judge_sample.start  task_id=%s  biz=%s", self.request.id, business_id)
+    try:
+        from core.llm_judge import judge_content
+        result = judge_content(content_html, keyword, intent, business_id, sample_rate=1.0)
+        if result is None:
+            return {"status": "skipped", "task_id": self.request.id}
+        out = {"status": "success", "passed": result.passed, "overall": result.overall, "scores": result.scores, "task_id": self.request.id}
+        _save_result(self.request.id, out)
+        log.info("run_llm_judge_sample.done  passed=%s  overall=%.1f", result.passed, result.overall)
+        return out
+    except Exception as exc:
+        log.exception("run_llm_judge_sample.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_hypothesis_generation")
+def run_hypothesis_generation(self, business_id: str = "") -> dict:
+    log.info("run_hypothesis_generation.start  task_id=%s  biz=%s", self.request.id, business_id)
+    try:
+        from core.hypothesis_engine import generate_hypotheses, promote_winning_hypotheses
+        hypotheses = generate_hypotheses(business_id)
+        promoted = promote_winning_hypotheses()
+        result = {"status": "success", "hypotheses_generated": len(hypotheses), "promoted": promoted, "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_hypothesis_generation.done  generated=%d  promoted=%d", len(hypotheses), promoted)
+        return result
+    except Exception as exc:
+        log.exception("run_hypothesis_generation.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_tenant_strategy_update")
+def run_tenant_strategy_update(self, business_id: str = "") -> dict:
+    log.info("run_tenant_strategy_update.start  task_id=%s  biz=%s", self.request.id, business_id)
+    try:
+        from core.tenant_strategy import update_strategy
+        import json
+        from pathlib import Path
+        all_biz = json.loads(Path("data/storage/businesses.json").read_text())
+        biz_ids = [b.get("id") or b.get("business_id") for b in (all_biz if isinstance(all_biz, list) else all_biz.values()) if b.get("id") or b.get("business_id")]
+        if business_id:
+            biz_ids = [business_id]
+        updated = 0
+        for bid in biz_ids:
+            try:
+                update_strategy(bid)
+                updated += 1
+            except Exception:
+                pass
+        result = {"status": "success", "tenants_updated": updated, "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_tenant_strategy_update.done  updated=%d", updated)
+        return result
+    except Exception as exc:
+        log.exception("run_tenant_strategy_update.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_competitor_exploit")
+def run_competitor_exploit(self, business_id: str = "") -> dict:
+    log.info("run_competitor_exploit.start  task_id=%s  biz=%s", self.request.id, business_id)
+    try:
+        from core.competitor_exploit import find_exploit_opportunities
+        opps = find_exploit_opportunities(business_id)
+        result = {"status": "success", "opportunities_found": len(opps), "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_competitor_exploit.done  opportunities=%d", len(opps))
+        return result
+    except Exception as exc:
+        log.exception("run_competitor_exploit.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_threshold_tuning")
+def run_threshold_tuning(self) -> dict:
+    log.info("run_threshold_tuning.start  task_id=%s", self.request.id)
+    try:
+        from core.threshold_tuner import tune_thresholds
+        tuned = tune_thresholds()
+        result = {"status": "success", "thresholds_adjusted": tuned, "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_threshold_tuning.done  adjusted=%d", tuned)
+        return result
+    except Exception as exc:
+        log.exception("run_threshold_tuning.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
