@@ -87,12 +87,14 @@ from api.brand_routes import router as brand_router
 from api.crawl_routes import router as crawl_router
 from api.citation_routes import router as citation_router
 from api.conversion_routes import router as conversion_router
+from api.parasite_routes import router as parasite_router
 app.include_router(crawl_router)
 app.include_router(brand_router)
 app.include_router(backlink_router)
 app.include_router(eeat_router)
 app.include_router(citation_router)
 app.include_router(conversion_router)
+app.include_router(parasite_router)
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response

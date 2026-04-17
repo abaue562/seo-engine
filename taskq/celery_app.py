@@ -542,3 +542,15 @@ app.conf.beat_schedule.update({
         "kwargs": {"business_id": ""},
     },
 })
+app.conf.beat_schedule.update({
+    "parasite-sweep-weekly": {
+        "task": "taskq.tasks.run_parasite_sweep_task",
+        "schedule": crontab(hour=9, minute=0, day_of_week=5),
+        "kwargs": {"business_id": ""},
+    },
+    "parasite-rank-check-weekly": {
+        "task": "taskq.tasks.run_parasite_rank_check",
+        "schedule": crontab(hour=10, minute=0, day_of_week=5),
+        "kwargs": {"business_id": ""},
+    },
+})

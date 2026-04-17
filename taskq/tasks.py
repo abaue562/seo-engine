@@ -3799,3 +3799,66 @@ def run_lead_report(self, business_id: str = "") -> dict:
     except Exception as exc:
         log.exception("run_lead_report.error  task_id=%s", self.request.id)
         return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="content", max_retries=2, name="taskq.tasks.run_parasite_sweep")
+def run_parasite_sweep_task(self, business_id: str = "") -> dict:
+    """Weekly: generate + publish parasite SEO content across high-DA platforms."""
+    log.info("run_parasite_sweep.start  task_id=%s  business_id=%s", self.request.id, business_id)
+    try:
+        import json
+        from core.parasite_seo import run_parasite_sweep
+        biz_ids = []
+        if business_id:
+            biz_ids = [business_id]
+        else:
+            try:
+                all_biz = json.loads(open("data/storage/businesses.json").read())
+                biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+                biz_ids = [b.get("id", b.get("business_id", "")) for b in biz_list if b.get("id") or b.get("business_id")]
+            except Exception:
+                pass
+        total_pages = 0
+        results = []
+        for bid in biz_ids:
+            if not bid:
+                continue
+            pages = run_parasite_sweep(bid)
+            total_pages += len(pages)
+            published = sum(1 for p in pages if p.get("status") == "published")
+            results.append({"business_id": bid, "pages": len(pages), "published": published})
+        log.info("run_parasite_sweep.done  task_id=%s  total=%d", self.request.id, total_pages)
+        return {"status": "ok", "total_pages": total_pages, "results": results, "task_id": self.request.id}
+    except Exception as exc:
+        log.exception("run_parasite_sweep.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=2, name="taskq.tasks.run_parasite_rank_check")
+def run_parasite_rank_check(self, business_id: str = "") -> dict:
+    """Weekly: check SERP positions for all published parasite pages."""
+    log.info("run_parasite_rank_check.start  task_id=%s", self.request.id)
+    try:
+        import json
+        from core.parasite_seo import check_parasite_rankings
+        biz_ids = []
+        if business_id:
+            biz_ids = [business_id]
+        else:
+            try:
+                all_biz = json.loads(open("data/storage/businesses.json").read())
+                biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+                biz_ids = [b.get("id", b.get("business_id", "")) for b in biz_list if b.get("id") or b.get("business_id")]
+            except Exception:
+                pass
+        all_results = []
+        for bid in biz_ids:
+            if not bid:
+                continue
+            rankings = check_parasite_rankings(bid)
+            all_results.extend(rankings)
+        log.info("run_parasite_rank_check.done  task_id=%s  checked=%d", self.request.id, len(all_results))
+        return {"status": "ok", "checked": len(all_results), "task_id": self.request.id}
+    except Exception as exc:
+        log.exception("run_parasite_rank_check.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
