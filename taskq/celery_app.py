@@ -463,3 +463,23 @@ app.conf.beat_schedule.update({
         "schedule": crontab(hour=4, minute=0, day_of_month=20),
     },
 })
+
+
+# GEO/AEO beat schedule
+app.conf.beat_schedule.update({
+    "ai-answer-monitor-weekly": {
+        "task": "taskq.tasks.run_ai_answer_monitor",
+        "schedule": crontab(hour=8, minute=0, day_of_week=1),
+        "kwargs": {"business_id": ""},
+    },
+    "geo-optimization-sweep-weekly": {
+        "task": "taskq.tasks.run_geo_optimization_sweep",
+        "schedule": crontab(hour=9, minute=0, day_of_week=1),
+        "kwargs": {"business_id": ""},
+    },
+    "llms-txt-deploy-weekly": {
+        "task": "taskq.tasks.run_llms_txt_deploy",
+        "schedule": crontab(hour=10, minute=0, day_of_week=1),
+        "kwargs": {"business_id": ""},
+    },
+})

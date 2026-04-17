@@ -3443,3 +3443,92 @@ def run_ai_version_evaluation(self) -> dict:
     except Exception as exc:
         log.exception("run_ai_version_evaluation.error  task_id=%s", self.request.id)
         return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+# GEO/AEO tasks
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_ai_answer_monitor")
+def run_ai_answer_monitor(self, business_id: str = "") -> dict:
+    log.info("run_ai_answer_monitor.start  task_id=%s  biz=%s", self.request.id, business_id)
+    try:
+        from core.ai_answer_monitor import run_keyword_monitor
+        import json
+        from pathlib import Path
+        if business_id:
+            result = run_keyword_monitor(business_id)
+        else:
+            all_biz = json.loads(Path("data/storage/businesses.json").read_text())
+            biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+            total_gaps = 0
+            total_wins = 0
+            for biz in biz_list:
+                bid = biz.get("id") or biz.get("business_id")
+                if bid:
+                    r = run_keyword_monitor(bid, max_keywords=10)
+                    total_gaps += r.get("citation_gaps", 0)
+                    total_wins += r.get("you_cited", 0)
+            result = {"status": "success", "total_gaps": total_gaps, "total_wins": total_wins}
+        result["task_id"] = self.request.id
+        _save_result(self.request.id, result)
+        log.info("run_ai_answer_monitor.done  gaps=%s  wins=%s", result.get("citation_gaps", result.get("total_gaps")), result.get("you_cited", result.get("total_wins")))
+        return result
+    except Exception as exc:
+        log.exception("run_ai_answer_monitor.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="execution", max_retries=1, name="taskq.tasks.run_geo_optimization_sweep")
+def run_geo_optimization_sweep(self, business_id: str = "") -> dict:
+    log.info("run_geo_optimization_sweep.start  task_id=%s  biz=%s", self.request.id, business_id)
+    try:
+        from core.geo_optimizer import score_geo_readiness
+        import sqlite3, requests as req_lib
+        conn = sqlite3.connect("data/storage/seo_engine.db")
+        urls = [(r[0], r[1], r[2]) for r in conn.execute(
+            "SELECT url, keyword, business_id FROM published_urls WHERE business_id=? AND status='live' LIMIT 20",
+            [business_id]).fetchall()]
+        conn.close()
+        scores = []
+        failing = 0
+        for url, keyword, bid in urls:
+            try:
+                html = req_lib.get(url, timeout=10).text
+                score = score_geo_readiness(html)
+                scores.append({"url": url, "keyword": keyword, "score": score["score"], "passing": score["passing"]})
+                if not score["passing"]:
+                    failing += 1
+            except Exception:
+                pass
+        avg_score = round(sum(s["score"] for s in scores) / max(len(scores), 1), 1)
+        result = {"status": "success", "pages_checked": len(scores), "avg_geo_score": avg_score, "failing_geo": failing, "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_geo_optimization_sweep.done  pages=%d  avg_score=%.1f  failing=%d", len(scores), avg_score, failing)
+        return result
+    except Exception as exc:
+        log.exception("run_geo_optimization_sweep.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="execution", max_retries=1, name="taskq.tasks.run_llms_txt_deploy")
+def run_llms_txt_deploy(self, business_id: str = "") -> dict:
+    log.info("run_llms_txt_deploy.start  task_id=%s  biz=%s", self.request.id, business_id)
+    try:
+        from core.llms_txt_builder import deploy_llms_txt, build_llms_txt
+        from core.geo_prompts import register_geo_prompts
+        register_geo_prompts()
+        if business_id:
+            content = build_llms_txt(business_id)
+            ok = deploy_llms_txt(business_id, output_path=f"public/{business_id}_llms.txt")
+            result = {"status": "success" if ok else "partial", "business_id": business_id, "content_length": len(content), "task_id": self.request.id}
+        else:
+            from core.llms_txt_builder import generate_platform_llms_txt
+            content = generate_platform_llms_txt()
+            with open("public/llms.txt", "w") as f:
+                f.write(content)
+            result = {"status": "success", "type": "platform", "content_length": len(content), "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_llms_txt_deploy.done  length=%d", result.get("content_length", 0))
+        return result
+    except Exception as exc:
+        log.exception("run_llms_txt_deploy.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}

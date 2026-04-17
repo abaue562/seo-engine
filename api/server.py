@@ -79,6 +79,8 @@ from api.tenant_routes import router as tenant_router
 app.include_router(tenant_router)
 from api.growth_routes import router as growth_router
 app.include_router(growth_router)
+from api.geo_routes import router as geo_router
+app.include_router(geo_router)
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response
