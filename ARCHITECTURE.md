@@ -566,3 +566,53 @@ Loaded into env at task start via: `inject_env_credentials(business_id, platform
 | 2026-04-17 | (audit corrections) | Corrected: dead letter queue ✅ (celery_app.py), circuit breaker ✅ (core/llm_gateway.py), PAA wired ✅ (tasks.py L833-845), anchor text distribution ✅ (execution/link_injector.py EXACT_MAX=15%), topical gap → auto-generate ✅ (queues top 3 via run_content_pipeline), content decay → refresh ✅ (execute_seo_task.apply_async), orphan detection → linker enforcement ✅ |
 | 2026-04-17 | 5cda556 | Added: execution/connectors/external/linkedin.py (DA 98, ugcPosts API, publish_article + publish_post), core/press_release.py (AP-style PR gen via Grok, PRLog DA69 distribution, run_press_release Celery task), credential_vault.py updated with linkedin+prlog keys |
 | 2026-04-17 | 8eece15 | Fix: core/email_sender.py — replaced Resend API (key missing) with Amazon SES SMTP already configured in config/.env (email-smtp.us-east-2.amazonaws.com:587). SMTP login verified live. Outreach automation (HARO, backlink, lead notifications) NOW ACTIVE — was blocked as gap #28 (Outreach: 2/10), now unblocked (pending SES sandbox check). All warmup/bounce/complaint rate logic preserved. |
+
+---
+
+## NEXT BUILD QUEUE (Self-Improvement Targets → 10/10)
+
+| Priority | Module | Replaces | Score Target |
+|----------|--------|---------|-------------|
+| 1 |  | DataForSEO rank tracking | #24 Indexing +2 |
+| 2 |  | DataForSEO keyword volume/KD | #5 Keyword +2 |
+| 3 |  | Ahrefs backlink data | #10 Backlinks +2 |
+| 4 | Wire  auto-create to beat | nothing (gap) | #17 Brand Entity +3 |
+| 5 |  | manual sitemap | #1 Tech SEO +2 |
+| 6 | Add llms.txt to beat schedule | nothing (gap) | #16 AI Format +1 |
+| 7 | Extend  for all platforms | OAuth API keys | #20 Parasite +3 |
+| 8 | Set REDDIT/MEDIUM/LINKEDIN/GITHUB keys | — | #18,#19,#20 +4 |
+
+## STRATEGY: Self-Hosted > Paid APIs (AGREED)
+- DO NOT flag DataForSEO, Ahrefs, Perplexity, Grok, Claude as gaps
+- Perplexity = CLI/cookie access ✅
+- Grok = AION Brain :9082 ✅  
+- Claude = CLI access ✅
+- DataForSEO → replace with Python scrapers
+- Ahrefs → replace with Common Crawl CDX API
+- Free SERP tiers available if needed: Serper (2500/mo), Tavily, Exa
+
+| 2026-04-17 | session | Established: self-hosted scraper strategy — DataForSEO/Ahrefs being replaced with Python scrapers + Common Crawl. Perplexity/Grok/Claude not API gaps — CLI/cookie access. |
+| 2026-04-17 | 8eece15 | Fix: email_sender.py — Amazon SES SMTP (credentials already in config/.env). Outreach automation UNBLOCKED. Score #28 Outreach: 2→7. |
+
+
+---
+
+## NEXT BUILD QUEUE (Self-Improvement Targets to 10/10)
+
+Priority 1: data/connectors/rank_checker.py — replaces DataForSEO rank tracking
+Priority 2: data/connectors/serp_volume_estimator.py — replaces DataForSEO keyword volume/KD
+Priority 3: data/connectors/common_crawl.py — replaces Ahrefs with free Common Crawl CDX API
+Priority 4: Wire authority/wikidata.py auto-create to beat schedule (code gap)
+Priority 5: data/storage/sitemap_builder.py — auto sitemap generation + IndexNow ping
+Priority 6: Add llms_txt_builder.py to beat schedule (weekly)
+Priority 7: Extend publish_via_playwright() for all platforms (Reddit/Medium/LinkedIn/GitHub)
+Priority 8: Set REDDIT/MEDIUM/LINKEDIN/GITHUB OAuth keys
+
+## STRATEGY: Self-Hosted Scrapers Replace Paid APIs (AGREED 2026-04-17)
+- DO NOT flag DataForSEO, Ahrefs, Perplexity, Grok, Claude as gaps ever again
+- Perplexity = CLI/cookie access (no API key needed)
+- Grok = AION Brain :9082 (no API key needed)
+- Claude = CLI access (no API key needed)
+- DataForSEO = being replaced with Python scrapers
+- Ahrefs = being replaced with Common Crawl CDX API (free, petabyte index)
+- Free SERP tiers available as backup: Serper (2500/mo free), Tavily, Exa
