@@ -59,7 +59,7 @@ app.conf.update(
     task_reject_on_worker_lost=True,
 
     # Result expiry — keep results for 7 days
-    result_expires=86400,  # 24h TTL (P1 bloat fix)
+    result_expires=604800,
 
     # Worker concurrency / prefetch
     worker_prefetch_multiplier=1,
@@ -106,9 +106,6 @@ app.conf.update(
         "taskq.tasks.send_daily_summary":    {"queue": "monitoring"},
         "taskq.tasks.send_ranking_report": {"queue": "monitoring"},
         "taskq.tasks.submit_sitemap": {"queue": "execution"},
-        "taskq.tasks.run_gbp_posts":          {"queue": "execution"},
-        "taskq.tasks.run_citation_builder":   {"queue": "execution"},
-        "taskq.tasks.run_wikidata_sync":       {"queue": "analysis"},
         # New Phase 2-14 tasks
         "taskq.tasks.run_programmatic_batch": {"queue": "execution"},
         "taskq.tasks.run_haro_check":         {"queue": "execution"},
@@ -210,16 +207,6 @@ app.conf.update(
             "schedule": 604800,
             "options": {"queue": "execution"},
         },
-        "run-wikidata-sync": {
-            "task": "taskq.tasks.run_wikidata_sync",
-            "schedule": 604800,          # 7 days
-            "options": {"queue": "analysis"},
-        },
-        "run-gbp-posts": {
-            "task": "taskq.tasks.run_gbp_posts",
-            "schedule": 604800,         # 7 days
-            "options": {"queue": "execution"},
-        },
         # ── Phase 3 — AION wiring schedules ───────────────────────────────
         "sync-twitter-intel": {
             "task": "taskq.tasks.sync_twitter_intel",
@@ -241,70 +228,9 @@ app.conf.update(
             "schedule": 43200,          # 12 hours — entity graph sync
             "options": {"queue": "analysis"},
         },
-        "run-programmatic-batch": {
-            "task": "taskq.tasks.run_programmatic_batch",
-            "schedule": 86400,          # 24 hours — publish 5 programmatic pages/day
-            "options": {"queue": "execution"},
-        },
-
-        "run-freshness-injector": {
-            "task": "taskq.tasks.inject_content_freshness",
-            "schedule": 604800,          # 7 days — update stale articles with new stats
-            "options": {"queue": "execution"},
-        },
-        "run-medium-syndication": {
-            "task": "taskq.tasks.syndicate_to_medium",
-            "schedule": 86400,           # daily — syndicate articles >7 days old
-            "options": {"queue": "execution"},
-        },
-        "run-reddit-answer-queue": {
-            "task": "taskq.tasks.run_reddit_answer_agent",
-            "schedule": 604800,          # 7 days — find & queue Reddit answers for review
-            "options": {"queue": "execution"},
-        },
-        "run-gsc-data-pull": {
-            "task": "taskq.tasks.pull_gsc_data",
-            "schedule": 86400,           # daily — pull GSC clicks/impressions/CTR
-            "options": {"queue": "analysis"},
-        },
-        "run-review-solicitation": {
-            "task": "taskq.tasks.send_review_requests",
-            "schedule": 86400,           # daily — send post-job review request emails
-            "options": {"queue": "execution"},
-        },
-        "run-citation-batch": {
-            "task": "taskq.tasks.run_citation_builder",
-            "schedule": 604800,          # 7 days — submit next 3 pending citation directories
-            "options": {"queue": "execution"},
-        },
         "competitor-content-alerts": {
             "task": "taskq.tasks.competitor_content_alerts",
-            "schedule": 86400,
-            "options": {"queue": "monitoring"},
-        },
-        "run-tech-audit": {
-            "task": "taskq.tasks.run_tech_audit",
-            "schedule": 604800,         # weekly technical SEO audit
-            "options": {"queue": "monitoring"},
-        },
-        "run-site-health-check": {
-            "task": "taskq.tasks.run_site_health_check",
-            "schedule": 86400,           # daily uptime + pagespeed sample
-            "options": {"queue": "monitoring"},
-        },
-        "run-cannibalization-check": {
-            "task": "taskq.tasks.run_cannibalization_check",
-            "schedule": 604800,          # weekly cannibalization scan
-            "options": {"queue": "monitoring"},
-        },
-        "run-refresh-queue": {
-            "task": "taskq.tasks.run_refresh_queue",
-            "schedule": 86400,           # daily refresh queue check
-            "options": {"queue": "execution"},
-        },
-        "run-competitor-tracking": {
-            "task": "taskq.tasks.run_competitor_tracking",
-            "schedule": 604800,          # weekly competitor diff
+            "schedule": 86400,          # 24 hours — competitor content monitoring
             "options": {"queue": "monitoring"},
         },
     },
@@ -371,61 +297,3 @@ def handle_task_failure(sender=None, task_id=None, exception=None,
         )
     except Exception as notify_err:
         _log.warning("dead_letter.notify_fail  err=%s", notify_err)
-
-
-# Distributed trace propagation (P1-A)
-try:
-    from core.tracing import setup_celery_tracing
-    setup_celery_tracing(app)
-except Exception as _te:
-    import logging
-    logging.getLogger(__name__).warning("tracing.setup_fail  err=%s", _te)
-
-
-# Worker observability metrics (P1-G)
-try:
-    from core.metrics import setup_celery_metrics
-    setup_celery_metrics(app)
-except Exception as _me:
-    import logging
-    logging.getLogger(__name__).warning("metrics.setup_fail  err=%s", _me)
-
-
-# Doc 07 beat schedule additions
-app.conf.beat_schedule.update({
-    "hypothesis-generation-weekly": {
-        "task": "taskq.tasks.run_hypothesis_generation",
-        "schedule": crontab(hour=3, minute=0, day_of_week=1),
-        "kwargs": {"business_id": ""},
-    },
-    "tenant-strategy-monthly": {
-        "task": "taskq.tasks.run_tenant_strategy_update",
-        "schedule": crontab(hour=4, minute=0, day_of_month=1),
-        "kwargs": {"business_id": ""},
-    },
-    "competitor-exploit-weekly": {
-        "task": "taskq.tasks.run_competitor_exploit",
-        "schedule": crontab(hour=5, minute=0, day_of_week=2),
-        "kwargs": {"business_id": ""},
-    },
-    "threshold-tuning-monthly": {
-        "task": "taskq.tasks.run_threshold_tuning",
-        "schedule": crontab(hour=2, minute=0, day_of_month=15),
-    },
-})
-
-
-
-# Doc 08 beat schedule additions
-app.conf.beat_schedule.update({
-    "pagespeed-sample-weekly": {
-        "task": "taskq.tasks.run_pagespeed_sample",
-        "schedule": crontab(hour=6, minute=0, day_of_week=3),
-        "kwargs": {"business_id": ""},
-    },
-    "schema-validation-weekly": {
-        "task": "taskq.tasks.run_schema_validation_sweep",
-        "schedule": crontab(hour=7, minute=0, day_of_week=3),
-        "kwargs": {"business_id": ""},
-    },
-})

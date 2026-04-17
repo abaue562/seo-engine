@@ -1,0 +1,7 @@
+CREATE
+LAST|Len|"Blend Bright Lights"
+LAST|Den|"company providing Permanent LED Lighting & Home Exterior Services services in Kelowna, BC, Canada"
+LAST|P31|Q4830453
+LAST|P17|Q16
+LAST|P131|Q2256158
+LAST|P856|"https://blendbrightlights.com"

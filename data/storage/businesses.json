@@ -90,6 +90,26 @@
     "wp_username": "abaue562",
     "wp_app_password": "Seotest!23",
     "wp_publish_status": "publish",
-    "service_radius_km": 100
+    "service_radius_km": 100,
+    "nap": {
+      "name": "Blend Bright Lights",
+      "phone": "+1-778-363-6289",
+      "phone_display": "(778) 363-6289",
+      "phone_e164": "+17783636289",
+      "address": {
+        "city": "Kelowna",
+        "region": "BC",
+        "country": "CA"
+      },
+      "email": "Contact@blendbrightlights.com"
+    },
+    "clusters": [
+      "led-lighting",
+      "gutter-guards",
+      "moss-removal",
+      "window-cleaning",
+      "roof-rejuvenation"
+    ],
+    "cluster_config_file": "data/storage/clusters.json"
   }
 ]
