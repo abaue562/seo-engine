@@ -1,20 +1,28 @@
-import json, logging, os
+import json, logging, os, smtplib
 from datetime import date
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 from typing import Optional
-import redis, requests
+import redis
 
 log = logging.getLogger(__name__)
 _redis = redis.Redis.from_url("redis://localhost:6379/0", decode_responses=True)
-RESEND_API = "https://api.resend.com/emails"
+
 
 class EmailSender:
     def __init__(self):
-        self.api_key = os.getenv("RESEND_API_KEY", "")
-        self.default_from = os.getenv("EMAIL_FROM", "noreply@gethubed.com")
+        self.smtp_host = os.getenv("SMTP_HOST", "")
+        self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
+        self.smtp_user = os.getenv("SMTP_USER", "")
+        self.smtp_pass = os.getenv("SMTP_PASS", "")
+        self.default_from = os.getenv("FROM_EMAIL", os.getenv("EMAIL_FROM", "noreply@gethubed.com"))
+
+    def _is_configured(self) -> bool:
+        return bool(self.smtp_host and self.smtp_user and self.smtp_pass)
 
     def send_transactional(self, to: str, subject: str, html: str, from_addr: Optional[str] = None) -> bool:
-        if not self.api_key:
-            log.warning("email_sender: RESEND_API_KEY not set")
+        if not self._is_configured():
+            log.warning("email_sender: SMTP_HOST/SMTP_USER/SMTP_PASS not set")
             return False
         sender = from_addr or self.default_from
         domain = sender.split("@")[-1]
@@ -22,13 +30,22 @@ class EmailSender:
             log.warning("email_sender: domain %s paused or over limit", domain)
             return False
         try:
-            resp = requests.post(RESEND_API, headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-                json={"from": sender, "to": [to], "subject": subject, "html": html}, timeout=15)
-            resp.raise_for_status()
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = sender
+            msg["To"] = to
+            msg.attach(MIMEText(html, "html"))
+
+            with smtplib.SMTP(self.smtp_host, self.smtp_port, timeout=15) as conn:
+                conn.ehlo()
+                conn.starttls()
+                conn.login(self.smtp_user, self.smtp_pass)
+                conn.sendmail(sender, [to], msg.as_string())
+
             self._track_send(domain)
             log.info("email_sender.sent  to=%s  subject=%s", to, subject[:40])
             return True
-        except Exception as exc:
+        except Exception:
             log.exception("email_sender.error  to=%s", to)
             return False
 
