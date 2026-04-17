@@ -3532,3 +3532,34 @@ def run_llms_txt_deploy(self, business_id: str = "") -> dict:
     except Exception as exc:
         log.exception("run_llms_txt_deploy.error  task_id=%s", self.request.id)
         return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue='monitoring', max_retries=1, name='taskq.tasks.run_eeat_sweep')
+def run_eeat_sweep(self, business_id: str = '') -> dict:
+    log.info('run_eeat_sweep.start  task_id=%s  biz=%s', self.request.id, business_id)
+    try:
+        import sqlite3
+        from core.eeat_pipeline import score_eeat
+        conn = sqlite3.connect('data/storage/seo_engine.db')
+        urls = [r[0] for r in conn.execute(
+            'SELECT url FROM published_urls WHERE business_id=? AND status=? LIMIT 50',
+            [business_id, 'live']).fetchall()]
+        conn.close()
+        low_scores = []
+        for url in urls:
+            try:
+                import urllib.request
+                html = urllib.request.urlopen(url, timeout=8).read().decode('utf-8', errors='ignore')
+                s = score_eeat(html)
+                if not s['passing']:
+                    low_scores.append({'url': url, 'score': s['total'], 'missing': s['missing']})
+            except Exception:
+                pass
+        result = {'status': 'success', 'checked': len(urls), 'below_threshold': len(low_scores),
+                  'low_score_urls': low_scores[:20], 'task_id': self.request.id}
+        _save_result(self.request.id, result)
+        log.info('run_eeat_sweep.done  checked=%d  low=%d', len(urls), len(low_scores))
+        return result
+    except Exception as exc:
+        log.exception('run_eeat_sweep.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}

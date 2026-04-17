@@ -74,3 +74,20 @@ class GenerationPipeline:
 
         _redis.incrby(f"pipeline:tokens:{self.business_id}", self.cost_tokens)
         return {"content": content, "stages_passed": stages_passed, "cost_tokens": self.cost_tokens}
+
+
+def run_pass5_eeat(html: str, business_id: str, content_url: str = "", business_name: str = "") -> str:
+    """Pass 5: E-E-A-T injection (author bio, FAQ schema, trust signals)."""
+    try:
+        from core.eeat_pipeline import run_eeat_pipeline
+        result = run_eeat_pipeline(
+            html=html,
+            business_id=business_id,
+            content_url=content_url,
+            business_name=business_name,
+        )
+        return result["html"]
+    except Exception:
+        import logging
+        logging.getLogger(__name__).exception("pass5_eeat failed")
+        return html

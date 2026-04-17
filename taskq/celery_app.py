@@ -477,6 +477,11 @@ app.conf.beat_schedule.update({
         "schedule": crontab(hour=9, minute=0, day_of_week=1),
         "kwargs": {"business_id": ""},
     },
+    "eeat-sweep-weekly": {
+        "task": "taskq.tasks.run_eeat_sweep",
+        "schedule": crontab(hour=11, minute=0, day_of_week=2),
+        "kwargs": {"business_id": ""},
+    },
     "llms-txt-deploy-weekly": {
         "task": "taskq.tasks.run_llms_txt_deploy",
         "schedule": crontab(hour=10, minute=0, day_of_week=1),
