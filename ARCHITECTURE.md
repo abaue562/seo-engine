@@ -655,3 +655,31 @@ Step 4: Onboard first real tenant → 9.2→9.7+
   rank_tracker.py patched: RankChecker default, DFS only if credentials set
   dataforseo.py patched: SERPVolumeEstimator as keyword fallback
   backlink_prospector.py patched: CommonCrawlClient for competitor gap analysis |
+
+## 2026-04-17 — Wikidata Auto-Create Pipeline (commit 5c442d8)
+
+Gap closed: Authority/Wikidata was generating QuickStatements files only (manual submission required).
+Now supports full programmatic entity creation via MediaWiki API.
+
+WikidataAPI class (authority/wikidata.py):
+  - login(): 3-step auth: get login token, POST login, get CSRF token
+  - create_item(entity): POST wbeditentity with claims P31/P17/P131/P856/P1329/P2888
+  - add_inception_date(qid, year): wbcreateclaim for P571
+  - Reads WIKIDATA_USERNAME + WIKIDATA_PASSWORD from env; QS file fallback if not set
+
+_store_qid(): UPDATE brand_entities SET wikidata_qid WHERE business_id in SQLite
+
+run_entity_pipeline() updated flow:
+  1. Notability check (existing)
+  2. SPARQL existence check (existing)
+  3. Build entity + validate sameAs URLs
+  4. If creds set: API create, store QID
+  5. Always save QS file as audit trail
+  6. Returns: created, qid, method, label, same_as_count, quickstatements_lines
+
+run_wikidata_sync task:
+  - Skips businesses with existing wikidata_qid
+  - Calls asyncio.run(run_entity_pipeline(biz)) per business
+  - Returns: status, total, created, results, task_id
+
+To activate: Set WIKIDATA_USERNAME and WIKIDATA_PASSWORD in config/.env
