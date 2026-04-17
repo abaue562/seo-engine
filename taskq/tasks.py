@@ -3668,3 +3668,67 @@ def run_keyword_opportunity_sweep(self, business_id: str = '') -> dict:
     except Exception as exc:
         log.exception('run_keyword_opportunity_sweep.error  task_id=%s', self.request.id)
         return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
+
+
+@app.task(bind=True, queue="content", max_retries=2, name="taskq.tasks.run_citation_facts_generate")
+def run_citation_facts_generate(self, business_id: str = "") -> dict:
+    """Weekly: generate local market facts for all tenants via Claude synthesis."""
+    log.info("run_citation_facts_generate.start  task_id=%s  business_id=%s", self.request.id, business_id)
+    try:
+        import json
+        from core.citable_data import generate_local_facts
+        biz_ids = []
+        if business_id:
+            biz_ids = [business_id]
+        else:
+            try:
+                all_biz = json.loads(open("data/storage/businesses.json").read())
+                biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+                biz_ids = [b.get("id", b.get("business_id", "")) for b in biz_list if b.get("id") or b.get("business_id")]
+            except Exception:
+                pass
+        total_facts = 0
+        results = []
+        for bid in biz_ids:
+            if not bid:
+                continue
+            facts = generate_local_facts(bid)
+            total_facts += len(facts)
+            results.append({"business_id": bid, "facts_generated": len(facts)})
+        log.info("run_citation_facts_generate.done  task_id=%s  total=%d", self.request.id, total_facts)
+        return {"status": "ok", "total_facts": total_facts, "results": results, "task_id": self.request.id}
+    except Exception as exc:
+        log.exception("run_citation_facts_generate.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="content", max_retries=2, name="taskq.tasks.run_citation_content_sweep")
+def run_citation_content_sweep_task(self, business_id: str = "") -> dict:
+    """Weekly: generate citation content pages (cost guides, stats, FAQ, local study)."""
+    log.info("run_citation_content_sweep.start  task_id=%s  business_id=%s", self.request.id, business_id)
+    try:
+        import json
+        from core.citation_content import run_citation_content_sweep
+        biz_ids = []
+        if business_id:
+            biz_ids = [business_id]
+        else:
+            try:
+                all_biz = json.loads(open("data/storage/businesses.json").read())
+                biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+                biz_ids = [b.get("id", b.get("business_id", "")) for b in biz_list if b.get("id") or b.get("business_id")]
+            except Exception:
+                pass
+        total_pages = 0
+        results = []
+        for bid in biz_ids:
+            if not bid:
+                continue
+            pages = run_citation_content_sweep(bid)
+            total_pages += len(pages)
+            results.append({"business_id": bid, "pages_generated": len(pages)})
+        log.info("run_citation_content_sweep.done  task_id=%s  total=%d", self.request.id, total_pages)
+        return {"status": "ok", "total_pages": total_pages, "results": results, "task_id": self.request.id}
+    except Exception as exc:
+        log.exception("run_citation_content_sweep.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}

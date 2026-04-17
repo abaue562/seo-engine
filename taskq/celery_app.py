@@ -518,3 +518,15 @@ app.conf.beat_schedule.update({
         "kwargs": {"business_id": ""},
     },
 })
+app.conf.beat_schedule.update({
+    'citation-facts-generate-weekly': {
+        'task': 'taskq.tasks.run_citation_facts_generate',
+        'schedule': crontab(hour=6, minute=0, day_of_week=4),
+        'kwargs': {'business_id': ''},
+    },
+    'citation-content-sweep-weekly': {
+        'task': 'taskq.tasks.run_citation_content_sweep',
+        'schedule': crontab(hour=7, minute=0, day_of_week=4),
+        'kwargs': {'business_id': ''},
+    },
+})

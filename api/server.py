@@ -85,10 +85,12 @@ from api.eeat_routes import router as eeat_router
 from api.backlink_routes import router as backlink_router
 from api.brand_routes import router as brand_router
 from api.crawl_routes import router as crawl_router
+from api.citation_routes import router as citation_router
 app.include_router(crawl_router)
 app.include_router(brand_router)
 app.include_router(backlink_router)
 app.include_router(eeat_router)
+app.include_router(citation_router)
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response
