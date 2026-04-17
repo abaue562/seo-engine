@@ -453,51 +453,293 @@ class SameAsValidator:
         return schema
 
 
-async def run_entity_pipeline(business: dict) -> dict:
-    """Full Wikidata entity creation pipeline for a business."""
-    builder = WikidataBuilder()
 
-    # Check notability
+# ---------------------------------------------------------------------------
+# Wikidata MediaWiki API — auto-creation (requires bot account credentials)
+# ---------------------------------------------------------------------------
+
+class WikidataAPI:
+    """Submit entities directly to Wikidata via MediaWiki API.
+
+    Requires a Wikidata bot account:
+      WIKIDATA_USERNAME=MyBot@my-bot-password-name
+      WIKIDATA_PASSWORD=the-bot-password
+
+    Set these in config/.env or via credential_vault.
+    """
+
+    API = "https://www.wikidata.org/w/api.php"
+    UA  = "SEOEngine/1.0 (https://gethubed.com; contact@gethubed.com)"
+
+    def __init__(self, username: str = "", password: str = ""):
+        import os
+        self.username = username or os.getenv("WIKIDATA_USERNAME", "")
+        self.password = password or os.getenv("WIKIDATA_PASSWORD", "")
+        self._session = None
+        self._csrf_token = None
+
+    def is_configured(self) -> bool:
+        return bool(self.username and self.password)
+
+    def _get_session(self):
+        import requests
+        if self._session is None:
+            self._session = requests.Session()
+            self._session.headers.update({"User-Agent": self.UA})
+        return self._session
+
+    def login(self) -> bool:
+        """Authenticate and store session cookies + CSRF token."""
+        sess = self._get_session()
+        try:
+            # Step 1: get login token
+            r = sess.get(self.API, params={
+                "action": "query", "meta": "tokens",
+                "type": "login", "format": "json"
+            }, timeout=15)
+            r.raise_for_status()
+            login_token = r.json()["query"]["tokens"]["logintoken"]
+
+            # Step 2: login
+            r = sess.post(self.API, data={
+                "action": "login",
+                "lgname": self.username,
+                "lgpassword": self.password,
+                "lgtoken": login_token,
+                "format": "json",
+            }, timeout=15)
+            r.raise_for_status()
+            result = r.json().get("login", {}).get("result", "")
+            if result != "Success":
+                log.error("wikidata_api.login_fail  result=%s", result)
+                return False
+
+            # Step 3: get CSRF token for edits
+            r = sess.get(self.API, params={
+                "action": "query", "meta": "tokens", "format": "json"
+            }, timeout=15)
+            r.raise_for_status()
+            self._csrf_token = r.json()["query"]["tokens"]["csrftoken"]
+            log.info("wikidata_api.login_ok  user=%s", self.username)
+            return True
+        except Exception as exc:
+            log.error("wikidata_api.login_error  err=%s", exc)
+            return False
+
+    def create_item(self, entity: "WikidataEntity") -> str:
+        """Create a new Wikidata item. Returns QID string (e.g. 'Q12345678') or ''."""
+        if not self._csrf_token:
+            if not self.login():
+                return ""
+
+        import json as _json
+        sess = self._get_session()
+
+        # Build item data with labels, descriptions, and core claims
+        item_data: dict = {
+            "labels": {"en": {"language": "en", "value": entity.label}},
+            "descriptions": {"en": {"language": "en", "value": entity.description}},
+            "claims": {},
+        }
+
+        def _item_claim(prop: str, qid: str) -> dict:
+            return {
+                "mainsnak": {
+                    "snaktype": "value", "property": prop,
+                    "datavalue": {"type": "wikibase-entityid",
+                                  "value": {"entity-type": "item", "id": qid}},
+                },
+                "type": "statement", "rank": "normal",
+            }
+
+        def _string_claim(prop: str, value: str) -> dict:
+            return {
+                "mainsnak": {
+                    "snaktype": "value", "property": prop,
+                    "datavalue": {"type": "string", "value": value},
+                },
+                "type": "statement", "rank": "normal",
+            }
+
+        def _url_claim(prop: str, url: str) -> dict:
+            return {
+                "mainsnak": {
+                    "snaktype": "value", "property": prop,
+                    "datavalue": {"type": "string", "value": url},
+                },
+                "type": "statement", "rank": "normal",
+            }
+
+        # P31 — instance of
+        if entity.instance_of:
+            item_data["claims"]["P31"] = [_item_claim("P31", entity.instance_of)]
+
+        # P17 — country (US)
+        item_data["claims"]["P17"] = [_item_claim("P17", entity.country or "Q30")]
+
+        # P131 — located in (city) — skip generic Q34404 placeholder
+        if entity.city_qid and entity.city_qid != "Q34404":
+            item_data["claims"]["P131"] = [_item_claim("P131", entity.city_qid)]
+
+        # P856 — official website
+        if entity.website:
+            website = entity.website if entity.website.startswith("http") else "https://" + entity.website
+            item_data["claims"]["P856"] = [_url_claim("P856", website)]
+
+        # P1329 — phone number
+        if entity.phone:
+            import re as _re
+            phone_clean = _re.sub(r"[^\d+]", "", entity.phone)
+            if phone_clean:
+                item_data["claims"]["P1329"] = [_string_claim("P1329", phone_clean)]
+
+        # P2888 — exact match / sameAs
+        if entity.same_as:
+            item_data["claims"]["P2888"] = [_url_claim("P2888", url) for url in entity.same_as[:5]]
+
+        try:
+            r = sess.post(self.API, data={
+                "action": "wbeditentity",
+                "new": "item",
+                "data": _json.dumps(item_data),
+                "token": self._csrf_token,
+                "format": "json",
+                "summary": "Entity created by SEOEngine automated pipeline",
+            }, timeout=30)
+            r.raise_for_status()
+            resp = r.json()
+            if "error" in resp:
+                log.error("wikidata_api.create_error  code=%s  info=%s",
+                          resp["error"].get("code"), resp["error"].get("info"))
+                return ""
+            qid = resp.get("entity", {}).get("id", "")
+            log.info("wikidata_api.created  label=%s  qid=%s", entity.label, qid)
+            return qid
+        except Exception as exc:
+            log.error("wikidata_api.create_fail  label=%s  err=%s", entity.label, exc)
+            return ""
+
+    def add_inception_date(self, qid: str, year: str) -> bool:
+        """Add P571 (inception/founded) date claim to existing item."""
+        if not year or not year.isdigit() or not self._csrf_token:
+            return False
+        sess = self._get_session()
+        import json as _json
+        claim_data = {
+            "mainsnak": {
+                "snaktype": "value", "property": "P571",
+                "datavalue": {
+                    "type": "time",
+                    "value": {
+                        "time": "+" + year + "-00-00T00:00:00Z",
+                        "timezone": 0, "before": 0, "after": 0,
+                        "precision": 9, "calendarmodel": "http://www.wikidata.org/entity/Q1985727",
+                    },
+                },
+            },
+            "type": "statement", "rank": "normal",
+        }
+        try:
+            r = sess.post(self.API, data={
+                "action": "wbcreateclaim",
+                "entity": qid,
+                "snaktype": "value",
+                "property": "P571",
+                "value": _json.dumps(claim_data["mainsnak"]["datavalue"]["value"]),
+                "token": self._csrf_token,
+                "format": "json",
+            }, timeout=15)
+            r.raise_for_status()
+            return "claim" in r.json()
+        except Exception as exc:
+            log.warning("wikidata_api.inception_fail  qid=%s  err=%s", qid, exc)
+            return False
+
+
+def _store_qid(business_id: str, qid: str) -> None:
+    """Persist Wikidata QID back to brand_entities SQLite table."""
+    import sqlite3
+    from datetime import datetime as _dt
+    db_path = "data/storage/seo_engine.db"
+    try:
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "UPDATE brand_entities SET wikidata_qid=?, updated_at=? WHERE business_id=?",
+            [qid, _dt.utcnow().isoformat(), business_id],
+        )
+        conn.commit()
+        conn.close()
+        log.info("wikidata.qid_stored  business_id=%s  qid=%s", business_id, qid)
+    except Exception as exc:
+        log.warning("wikidata.qid_store_fail  err=%s", exc)
+
+
+async def run_entity_pipeline(business: dict) -> dict:
+    """Full Wikidata entity creation pipeline for a business.
+
+    Flow:
+      1. Notability check
+      2. Check if already exists on Wikidata (SPARQL search)
+      3. If credentials set: auto-create via MediaWiki API → get QID
+      4. If no credentials: generate QuickStatements file for manual submission
+      5. Store QID in brand_entities table
+    """
+    builder = WikidataBuilder()
+    api = WikidataAPI()
+
+    # 1. Notability check
     notable, reason = await builder.check_notability(business)
     if not notable:
         log.info("wikidata.skip  name=%s  reason=%s", business.get("name"), reason)
         return {"created": False, "reason": reason}
 
-    # Check if already exists
+    # 2. Check if already exists
     existing_qid = await builder.check_exists(
-        business.get("name", ""),
-        business.get("city", ""),
+        business.get("name", ""), business.get("city", "")
     )
     if existing_qid:
-        log.info("wikidata.exists_skip  name=%s  qid=%s", business.get("name"), existing_qid)
+        _store_qid(business.get("business_id", ""), existing_qid)
+        log.info("wikidata.exists  name=%s  qid=%s", business.get("name"), existing_qid)
         return {"created": False, "qid": existing_qid, "reason": "already exists"}
 
-    # Build entity
+    # 3. Build entity + validate sameAs
     entity = builder.build_entity(business)
     entity.created_at = datetime.now(tz=timezone.utc).isoformat()
-
-    # Validate sameAs
     validator = SameAsValidator()
     if entity.same_as:
         validation = await validator.validate_urls(entity.same_as)
-        entity.same_as = [
-            url for url, info in validation.items()
-            if info.get("reachable")
-        ]
+        entity.same_as = [u for u, info in validation.items() if info.get("reachable")]
 
-    # Save entity + QuickStatements
+    qid = ""
+
+    # 4a. Auto-create via API if credentials configured
+    if api.is_configured():
+        log.info("wikidata.api_create  name=%s", entity.label)
+        qid = api.create_item(entity)
+        if qid and entity.founded:
+            api.add_inception_date(qid, entity.founded)
+        entity.qid = qid
+
+    # 4b. Always save QS file as audit trail / fallback
     builder.save_entity(entity)
-
     qs = builder.to_quickstatements(entity)
-    log.info(
-        "wikidata.pipeline_done  name=%s  same_as=%d  qs_lines=%d  notable=%s",
-        entity.label, len(entity.same_as), len(qs.splitlines()), reason,
-    )
 
+    # 5. Store QID
+    if qid:
+        _store_qid(business.get("business_id", ""), qid)
+
+    method = "api" if qid else "quickstatements_file"
+    log.info(
+        "wikidata.pipeline_done  name=%s  qid=%s  method=%s  same_as=%d",
+        entity.label, qid or "pending_manual", method, len(entity.same_as),
+    )
     return {
-        "created": True,
+        "created": bool(qid),
+        "qid": qid,
+        "method": method,
         "label": entity.label,
         "same_as_count": len(entity.same_as),
         "quickstatements_lines": len(qs.splitlines()),
         "notable_reason": reason,
+        "instructions": "" if qid else "Submit QS file at https://quickstatements.toolforge.org",
     }

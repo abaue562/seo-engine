@@ -2706,13 +2706,16 @@ def run_citation_builder(self) -> dict:
 def run_wikidata_sync(self) -> dict:
     """Create or verify Wikidata entities for each business.
 
-    Attempts to create a minimal Wikidata entity (Q-item) for each business
-    using the QuickStatements API.  If Wikidata credentials are not configured
-    (most common case) it outputs a ready-to-submit QuickStatements CSV
-    to data/storage/wikidata/ for manual submission.  Runs weekly.
+    If WIKIDATA_USERNAME + WIKIDATA_PASSWORD are set in config/.env:
+      → Auto-creates entity via MediaWiki API, stores QID in brand_entities table.
+    Otherwise:
+      → Generates QuickStatements files in data/storage/wikidata/ for manual submission.
+
+    Runs weekly via beat schedule.
     """
-    import json, datetime
+    import asyncio, json, os
     from pathlib import Path
+
     log.info('run_wikidata_sync.start  task_id=%s', self.request.id)
 
     biz_file = Path('data/storage/businesses.json')
@@ -2720,91 +2723,33 @@ def run_wikidata_sync(self) -> dict:
         return {'status': 'no_businesses', 'task_id': self.request.id}
 
     businesses = json.loads(biz_file.read_text())
-    wd_dir = Path('data/storage/wikidata')
-    wd_dir.mkdir(parents=True, exist_ok=True)
+    has_api_creds = bool(os.getenv('WIKIDATA_USERNAME') and os.getenv('WIKIDATA_PASSWORD'))
+    log.info('run_wikidata_sync.mode  api=%s  businesses=%d', has_api_creds, len(businesses))
 
     results = []
     for biz in businesses:
         name = biz.get('name', '')
-        domain = biz.get('website', biz.get('domain', ''))
-        city = biz.get('primary_city', biz.get('city', ''))
-        province = biz.get('state', 'BC')
-        service = biz.get('primary_service', '')
         if not name:
             continue
-
-        # Build QuickStatements batch for manual submission
-        # P31 = instance of (Q4830453 = business)
-        # P18 = image (skip)
-        # P856 = official website
-        # P131 = located in administrative unit (Q2256158 = Kelowna)
-        # P749 = parent organization (skip)
-        city_qid_map = {
-            'Kelowna': 'Q2256158', 'Vernon': 'Q234764', 'Penticton': 'Q1140340',
-            'Salmon Arm': 'Q1058906', 'West Kelowna': 'Q2522718',
-        }
-        city_qid = city_qid_map.get(city, '')
-        safe_name = name.replace('"', '')
-        qs_lines = [
-            'CREATE',
-            f'LAST|Len|"{safe_name}"',
-            f'LAST|Den|"company providing {service} services in {city}, {province}, Canada"',
-            'LAST|P31|Q4830453',  # instance of: business
-            'LAST|P17|Q16',       # country: Canada
-        ]
-        if city_qid:
-            qs_lines.append(f'LAST|P131|{city_qid}')
-        if domain:
-            website = domain if domain.startswith('http') else f'https://{domain}'
-            qs_lines.append(f'LAST|P856|"{website}"')
-
-        qs_content = chr(10).join(qs_lines)
-        safe_biz = name.lower().replace(' ', '_').replace('/', '_')[:30]
-        qs_file = wd_dir / f'{safe_biz}_quickstatements.txt'
-        qs_file.write_text(qs_content)
-
-        # Check if a Wikidata QID is already stored
         existing_qid = biz.get('wikidata_qid', '')
         if existing_qid:
-            log.info('run_wikidata_sync.has_qid  biz=%s  qid=%s', name, existing_qid)
+            log.info('run_wikidata_sync.skip_existing  biz=%s  qid=%s', name, existing_qid)
             results.append({'business': name, 'status': 'existing_qid', 'qid': existing_qid})
-        else:
-            # Attempt live search via Wikidata API
-            try:
-                import urllib.request, urllib.parse
-                search_url = (
-                    'https://www.wikidata.org/w/api.php?action=wbsearchentities'
-                    '&search=' + urllib.parse.quote(name) +
-                    '&language=en&format=json&limit=3'
-                )
-                req = urllib.request.Request(search_url, headers={'User-Agent': 'SEOEngine/1.0 (contact@seoengine.ca)'})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    data = json.loads(resp.read())
-                matches = data.get('search', [])
-                # Check if any match is plausibly our business
-                found_qid = None
-                for m in matches:
-                    if name.lower() in m.get('label', '').lower():
-                        found_qid = m.get('id', '')
-                        break
-                if found_qid:
-                    log.info('run_wikidata_sync.found  biz=%s  qid=%s', name, found_qid)
-                    results.append({'business': name, 'status': 'found', 'qid': found_qid, 'qs_file': str(qs_file)})
-                else:
-                    log.info('run_wikidata_sync.not_found  biz=%s  qs_file=%s', name, qs_file)
-                    results.append({'business': name, 'status': 'needs_creation', 'qs_file': str(qs_file),
-                                    'instructions': 'Submit qs_file content at https://quickstatements.toolforge.org'})
-            except Exception as e:
-                log.warning('run_wikidata_sync.api_fail  biz=%s  err=%s', name, e)
-                results.append({'business': name, 'status': 'api_error', 'qs_file': str(qs_file)})
+            continue
+        try:
+            from authority.wikidata import run_entity_pipeline
+            result = asyncio.run(run_entity_pipeline(biz))
+            result['business'] = name
+            results.append(result)
+            log.info('run_wikidata_sync.processed  biz=%s  created=%s  qid=%s',
+                     name, result.get('created'), result.get('qid', 'none'))
+        except Exception as exc:
+            log.exception('run_wikidata_sync.error  biz=%s', name)
+            results.append({'business': name, 'status': 'error', 'error': str(exc)})
 
-    log.info('run_wikidata_sync.done  task_id=%s  businesses=%d', self.request.id, len(results))
-    return {'status': 'done', 'results': results, 'task_id': self.request.id}
-
-
-# ===========================================================================
-# STUB TASKS — Beat-scheduled; real implementations added iteratively
-# ===========================================================================
+    created = sum(1 for r in results if r.get('created'))
+    log.info('run_wikidata_sync.done  task_id=%s  total=%d  created=%d', self.request.id, len(results), created)
+    return {'status': 'done', 'total': len(results), 'created': created, 'results': results, 'task_id': self.request.id}
 
 @app.task(bind=True, queue="execution", max_retries=1, name="taskq.tasks.inject_content_freshness")
 def inject_content_freshness(self) -> dict:
@@ -3866,7 +3811,7 @@ def run_parasite_rank_check(self, business_id: str = "") -> dict:
 
 @app.task(bind=True, queue='content', max_retries=1, name='taskq.tasks.run_onboarding_task')
 def run_onboarding_task(self, profile: dict) -> dict:
-    Run full 9-step onboarding pipeline for a new tenant.
+    """Run full 9-step onboarding pipeline for a new tenant."""
     log.info('run_onboarding_task.start  task_id=%s  business_id=%s', self.request.id, profile.get('business_id'))
     try:
         from core.onboarding_orchestrator import start_onboarding
@@ -3880,7 +3825,7 @@ def run_onboarding_task(self, profile: dict) -> dict:
 
 @app.task(bind=True, queue='execution', max_retries=2, name='taskq.tasks.run_press_release')
 def run_press_release(self, business_id: str, trigger_type: str, context: dict) -> dict:
-    Generate and distribute a press release for a content publication event.
+    """Generate and distribute a press release for a content publication event."""
     log.info('run_press_release.start  task_id=%s  business_id=%s  trigger=%s', self.request.id, business_id, trigger_type)
     try:
         from core.press_release import auto_press_release
