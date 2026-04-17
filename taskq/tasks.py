@@ -3876,3 +3876,18 @@ def run_onboarding_task(self, profile: dict) -> dict:
     except Exception as exc:
         log.exception('run_onboarding_task.error  task_id=%s', self.request.id)
         return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
+
+
+@app.task(bind=True, queue='execution', max_retries=2, name='taskq.tasks.run_press_release')
+def run_press_release(self, business_id: str, trigger_type: str, context: dict) -> dict:
+    Generate and distribute a press release for a content publication event.
+    log.info('run_press_release.start  task_id=%s  business_id=%s  trigger=%s', self.request.id, business_id, trigger_type)
+    try:
+        from core.press_release import auto_press_release
+        contact_email = context.pop('contact_email', '')
+        result = auto_press_release(business_id, trigger_type, context, contact_email)
+        log.info('run_press_release.done  task_id=%s  pr_id=%s', self.request.id, result.get('id'))
+        return {'status': 'ok', 'task_id': self.request.id, **result}
+    except Exception as exc:
+        log.exception('run_press_release.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}

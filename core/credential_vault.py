@@ -141,3 +141,8 @@ def inject_env_credentials(business_id: str, platform: str):
         val = get_credential(business_id, platform, k)
         if val:
             os.environ[k] = val
+
+# LinkedIn credentials added
+PLATFORM_KEYS[linkedin] = [LINKEDIN_ACCESS_TOKEN, LINKEDIN_AUTHOR_URN, LINKEDIN_CLIENT_ID, LINKEDIN_CLIENT_SECRET]
+# PRLog credentials added
+PLATFORM_KEYS[prlog] = [PRLOG_EMAIL, PRLOG_PASSWORD]

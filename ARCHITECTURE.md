@@ -562,3 +562,5 @@ Loaded into env at task start via: `inject_env_credentials(business_id, platform
 | 2026-04-17 | 58f5c5a | Added: backlink_prospector.py, backlink_outreach.py, backlink_routes.py — Gap #3 Backlink Acquisition |
 | 2026-04-17 | f111857 | Added: author_profiles.py, trust_signals.py, eeat_pipeline.py, eeat_routes.py — Gap #2 E-E-A-T |
 | 2026-04-17 | 4bea439 | Added: geo_optimizer.py, speakable_schema.py, llms_txt_builder.py, ai_answer_monitor.py, entity_chains.py, geo_routes.py — Gap #1 GEO/AEO |
+| 2026-04-17 | (sync audit) | Confirmed VPS is authoritative — local Desktop copy is older subset, nothing to sync up |
+| 2026-04-17 | (audit corrections) | Corrected: dead letter queue ✅ (celery_app.py), circuit breaker ✅ (core/llm_gateway.py), PAA wired ✅ (tasks.py L833-845), anchor text distribution ✅ (execution/link_injector.py EXACT_MAX=15%), topical gap → auto-generate ✅ (queues top 3 via run_content_pipeline), content decay → refresh ✅ (execute_seo_task.apply_async), orphan detection → linker enforcement ✅ |
