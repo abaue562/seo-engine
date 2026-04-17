@@ -429,3 +429,20 @@ app.conf.beat_schedule.update({
         "kwargs": {"business_id": ""},
     },
 })
+
+
+# Doc 09 beat schedule additions
+app.conf.beat_schedule.update({
+    health-score-daily: {
+        task: taskq.tasks.run_health_score_sweep,
+        schedule: crontab(hour=1, minute=0),
+    },
+    expansion-sweep-daily: {
+        task: taskq.tasks.run_expansion_sweep,
+        schedule: crontab(hour=2, minute=30),
+    },
+    case-study-scan-monthly: {
+        task: taskq.tasks.run_case_study_scan,
+        schedule: crontab(hour=3, minute=0, day_of_month=7),
+    },
+})

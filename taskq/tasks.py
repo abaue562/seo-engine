@@ -3343,3 +3343,50 @@ def run_schema_validation_sweep(self, business_id: str = "") -> dict:
     except Exception as exc:
         log.exception("run_schema_validation_sweep.error  task_id=%s", self.request.id)
         return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+# Doc 09 tasks
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_health_score_sweep")
+def run_health_score_sweep(self) -> dict:
+    log.info("run_health_score_sweep.start  task_id=%s", self.request.id)
+    try:
+        from core.health_score import batch_compute_health_scores
+        count = batch_compute_health_scores()
+        result = {"status": "success", "tenants_scored": count, "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_health_score_sweep.done  count=%d", count)
+        return result
+    except Exception as exc:
+        log.exception("run_health_score_sweep.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_expansion_sweep")
+def run_expansion_sweep(self) -> dict:
+    log.info("run_expansion_sweep.start  task_id=%s", self.request.id)
+    try:
+        from core.expansion import run_expansion_sweep as _sweep
+        result = _sweep()
+        result["task_id"] = self.request.id
+        _save_result(self.request.id, result)
+        log.info("run_expansion_sweep.done  tenants=%d", result.get("tenants_checked", 0))
+        return result
+    except Exception as exc:
+        log.exception("run_expansion_sweep.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_case_study_scan")
+def run_case_study_scan(self) -> dict:
+    log.info("run_case_study_scan.start  task_id=%s", self.request.id)
+    try:
+        from core.case_study import scan_for_eligible_tenants
+        drafted = scan_for_eligible_tenants()
+        result = {"status": "success", "case_studies_drafted": drafted, "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_case_study_scan.done  drafted=%d", drafted)
+        return result
+    except Exception as exc:
+        log.exception("run_case_study_scan.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
