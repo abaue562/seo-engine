@@ -477,6 +477,16 @@ app.conf.beat_schedule.update({
         "schedule": crontab(hour=9, minute=0, day_of_week=1),
         "kwargs": {"business_id": ""},
     },
+    "backlink-prospecting-weekly": {
+        "task": "taskq.tasks.run_backlink_prospecting",
+        "schedule": crontab(hour=6, minute=0, day_of_week=1),
+        "kwargs": {"business_id": ""},
+    },
+    "backlink-health-biweekly": {
+        "task": "taskq.tasks.run_backlink_health_check",
+        "schedule": crontab(hour=7, minute=0, day_of_week="1,4"),
+        "kwargs": {"business_id": ""},
+    },
     "eeat-sweep-weekly": {
         "task": "taskq.tasks.run_eeat_sweep",
         "schedule": crontab(hour=11, minute=0, day_of_week=2),

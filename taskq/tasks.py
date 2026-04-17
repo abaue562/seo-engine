@@ -3563,3 +3563,31 @@ def run_eeat_sweep(self, business_id: str = '') -> dict:
     except Exception as exc:
         log.exception('run_eeat_sweep.error  task_id=%s', self.request.id)
         return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
+
+
+@app.task(bind=True, queue='monitoring', max_retries=1, name='taskq.tasks.run_backlink_prospecting')
+def run_backlink_prospecting(self, business_id: str = '') -> dict:
+    log.info('run_backlink_prospecting.start  task_id=%s  biz=%s', self.request.id, business_id)
+    try:
+        from core.backlink_prospector import run_prospect_sweep
+        result = run_prospect_sweep(business_id)
+        _save_result(self.request.id, {'status': 'success', **result, 'task_id': self.request.id})
+        log.info('run_backlink_prospecting.done  total=%d', result.get('total_found', 0))
+        return {'status': 'success', **result, 'task_id': self.request.id}
+    except Exception as exc:
+        log.exception('run_backlink_prospecting.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
+
+
+@app.task(bind=True, queue='execution', max_retries=1, name='taskq.tasks.run_backlink_health_check')
+def run_backlink_health_check(self, business_id: str = '') -> dict:
+    log.info('run_backlink_health_check.start  task_id=%s  biz=%s', self.request.id, business_id)
+    try:
+        from core.backlink_prospector import check_backlink_health
+        result = check_backlink_health(business_id)
+        _save_result(self.request.id, {'status': 'success', **result, 'task_id': self.request.id})
+        log.info('run_backlink_health_check.done  live=%d  dead=%d', result['live'], result['dead'])
+        return {'status': 'success', **result, 'task_id': self.request.id}
+    except Exception as exc:
+        log.exception('run_backlink_health_check.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
