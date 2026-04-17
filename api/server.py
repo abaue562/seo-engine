@@ -74,6 +74,47 @@ app = FastAPI(
 if lead_router is not None:
     app.include_router(lead_router, prefix="/conversion")
 
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import Response
+import hashlib, time, json
+
+class _ResponseCacheMiddleware(BaseHTTPMiddleware):
+    """Per-tenant GET response cache. TTL 30-60s. Invalidated on writes."""
+    _CACHEABLE = {'/stats', '/content', '/keywords', '/health'}
+    _TTL = 45  # seconds — warm but not stale
+
+    async def dispatch(self, request: StarletteRequest, call_next):
+        if request.method != 'GET':
+            return await call_next(request)
+        path = request.url.path
+        if not any(path.endswith(p) or path.startswith('/businesses') for p in self._CACHEABLE):
+            return await call_next(request)
+        try:
+            import redis as _redis
+            r = _redis.from_url('redis://localhost:6379/0', decode_responses=True, socket_timeout=1)
+            ck = 'api_cache:' + hashlib.sha256((path + '?' + str(request.query_params)).encode()).hexdigest()
+            cached = r.get(ck)
+            if cached:
+                data = json.loads(cached)
+                return Response(content=cached, media_type='application/json',
+                                headers={'X-Cache': 'HIT', 'X-Cache-TTL': str(self._TTL)})
+        except Exception:
+            return await call_next(request)
+        resp = await call_next(request)
+        if resp.status_code == 200:
+            body = b''
+            async for chunk in resp.body_iterator:
+                body += chunk
+            try:
+                r.setex(ck, self._TTL, body.decode())
+            except Exception:
+                pass
+            return Response(content=body, status_code=resp.status_code,
+                            headers=dict(resp.headers) | {'X-Cache': 'MISS'})
+        return resp
+
+app.add_middleware(_ResponseCacheMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3900", "http://127.0.0.1:3900"],
