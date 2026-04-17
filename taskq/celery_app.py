@@ -109,6 +109,7 @@ app.conf.update(
         "taskq.tasks.run_gbp_posts":          {"queue": "execution"},
         "taskq.tasks.run_citation_builder":   {"queue": "execution"},
         "taskq.tasks.run_wikidata_sync":       {"queue": "analysis"},
+        "taskq.tasks.run_sitemap_sync":        {"queue": "analysis"},
         # New Phase 2-14 tasks
         "taskq.tasks.run_programmatic_batch": {"queue": "execution"},
         "taskq.tasks.run_haro_check":         {"queue": "execution"},
@@ -213,6 +214,11 @@ app.conf.update(
         "run-wikidata-sync": {
             "task": "taskq.tasks.run_wikidata_sync",
             "schedule": 604800,          # 7 days
+            "options": {"queue": "analysis"},
+        },
+        "run-sitemap-sync": {
+            "task": "taskq.tasks.run_sitemap_sync",
+            "schedule": 604800,          # 7 days — weekly sitemap rebuild + ping
             "options": {"queue": "analysis"},
         },
         "run-gbp-posts": {

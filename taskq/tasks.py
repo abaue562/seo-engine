@@ -2751,6 +2751,25 @@ def run_wikidata_sync(self) -> dict:
     log.info('run_wikidata_sync.done  task_id=%s  total=%d  created=%d', self.request.id, len(results), created)
     return {'status': 'done', 'total': len(results), 'created': created, 'results': results, 'task_id': self.request.id}
 
+@app.task(bind=True, queue='analysis', max_retries=1, name='taskq.tasks.run_sitemap_sync')
+def run_sitemap_sync(self) -> dict:
+    """Generate XML sitemaps for all businesses and ping Google + Bing.
+
+    Sources: brand homepage, citation pages, parasite pages,
+    keyword ranking URLs, published_urls JSON, crawled pages.
+    Runs weekly. Creates sitemap_index.xml for large sites (>500 URLs).
+    """
+    log.info('run_sitemap_sync.start  task_id=%s', self.request.id)
+    from core.sitemap_generator import generate_all_sitemaps
+    results = generate_all_sitemaps(ping=True)
+    total_urls = sum(r.get('urls', 0) for r in results)
+    ok = sum(1 for r in results if r.get('status') == 'ok')
+    log.info('run_sitemap_sync.done  task_id=%s  businesses=%d  ok=%d  total_urls=%d',
+             self.request.id, len(results), ok, total_urls)
+    return {'status': 'done', 'businesses': len(results), 'ok': ok,
+            'total_urls': total_urls, 'results': results, 'task_id': self.request.id}
+
+
 @app.task(bind=True, queue="execution", max_retries=1, name="taskq.tasks.inject_content_freshness")
 def inject_content_freshness(self) -> dict:
     """Weekly freshness pass: update stale articles with new stats, bump dateModified.
