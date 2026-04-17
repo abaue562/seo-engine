@@ -616,3 +616,34 @@ Priority 8: Set REDDIT/MEDIUM/LINKEDIN/GITHUB OAuth keys
 - DataForSEO = being replaced with Python scrapers
 - Ahrefs = being replaced with Common Crawl CDX API (free, petabyte index)
 - Free SERP tiers available as backup: Serper (2500/mo free), Tavily, Exa
+
+## AUDIT UPDATE — 2026-04-17 (Deep Sweep)
+
+**Accurate score after live SSH verification: 7.0/10**
+
+61 beat tasks confirmed. Many previously-unknown modules and scheduled jobs discovered.
+
+### Key Score Corrections vs Previous Audit
+- #22 Automation Robustness: 7→9 (61 beat tasks, DLQ, circuit breaker all confirmed)
+- #28 Outreach Automation: 2→7 (SES SMTP now live — email delivering)
+- #14 GEO/AEO: 6→8 (geo_optimization_sweep + ai_answer_monitor + llms_txt both scheduled)
+- #16 Content Formatting: 6→8 (deploy_llms_txt + run_llms_txt_deploy both in beat)
+- #21 Content Freshness: 6→8 (scan_content_decay + inject_content_freshness + run_refresh_queue)
+- #12 Competitor Analysis: 6→8 (run_competitor_crawl + run_competitor_exploit + competitor_content_alerts)
+- #20 Parasite SEO: 3→5 (run_parasite_sweep_task + run_parasite_rank_check scheduled)
+- #17 Brand Entity: 3→5 (run_wikidata_sync + run_entity_sweep + sync_entity_knowledge_graph scheduled)
+- #30 Defensibility: 3→5 (run_learning + hypothesis + sync_aion_signals + run_signal_layer_sweep)
+
+### Remaining Score Killers (blockers only)
+1. #18 GitHub SEO: 2/10 — GITHUB_TOKEN not set (code ready)
+2. #19 Cross-Platform: 6/10 — all platform keys missing (code ready)
+3. #20 Parasite SEO: 5/10 — all platform keys missing (code ready)
+4. #5 Keyword Strategy: 7/10 — no real volume data (self-hosted scraper in build queue)
+5. #27 Data Moat: 5/10 — synthetic data only (real data scrapers in build queue)
+6. #17 Brand Entity: 5/10 — Wikidata auto-create not wired to API (in build queue)
+
+### Path to 10/10
+Step 1: Set GitHub/Reddit/Medium/LinkedIn/DevTo API keys → 7.0→8.2
+Step 2: Build rank_checker + serp_volume_estimator + common_crawl → 8.2→8.8
+Step 3: Build Wikidata auto-create pipeline → 8.8→9.2
+Step 4: Onboard first real tenant → 9.2→9.7+
