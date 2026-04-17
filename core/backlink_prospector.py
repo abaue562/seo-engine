@@ -156,52 +156,38 @@ def update_prospect_status(prospect_id: str, status: str) -> None:
 
 
 def find_competitor_gap_prospects(business_id: str, your_domain: str, competitors: list[str], limit: int = 30) -> list[dict]:
-    """Use DataForSEO to find backlinks competitors have that you don't."""
-    try:
-        from data.connectors.dataforseo import DataForSEOClient
-        client = DataForSEOClient(business_id)
-    except Exception:
-        log.warning("find_competitor_gap_prospects: DataForSEO unavailable")
-        return []
+    """Find backlinks competitors have that you don't via Common Crawl + Wayback (free, no API key)."""
+    from data.connectors.common_crawl import CommonCrawlClient
+    cc = CommonCrawlClient()
 
-    your_backlinks: set[str] = set()
     try:
-        your_data = client.get_backlink_summary(your_domain)
-        for item in your_data.get("items", []):
-            your_backlinks.add(_extract_domain(item.get("url_from", "")))
+        gaps = cc.get_link_gaps(your_domain, competitors, limit=limit)
     except Exception:
-        log.exception("competitor_gap: failed to fetch own backlinks")
+        log.exception("find_competitor_gap_prospects: CommonCrawl failed")
+        gaps = []
 
     prospects = []
-    for comp in competitors[:3]:
-        try:
-            data = client.get_backlink_summary(comp)
-            for item in data.get("items", []):
-                source = item.get("url_from", "")
-                source_domain = _extract_domain(source)
-                if not source_domain or source_domain in your_backlinks:
-                    continue
-                dr = item.get("domain_from_rank", 0)
-                if dr < 20:
-                    continue
-                p = add_prospect(
-                    business_id=business_id,
-                    opportunity_type="competitor_gap",
-                    target_url=source,
-                    domain_rating=dr,
-                    page_title=item.get("title", ""),
-                    anchor_context=f"Competitor {comp} has a link from this page",
-                    pitch_angle=f"They link to {comp} — offer your content as a better/complementary resource",
-                )
-                prospects.append(p)
-                if len(prospects) >= limit:
-                    break
-        except Exception:
-            log.exception("competitor_gap: failed for %s", comp)
+    for gap in gaps:
+        source_domain = gap.get("referring_domain", "")
+        source_url = gap.get("example_url", "https://" + source_domain)
+        dr = gap.get("da_estimate", 0)
+        if dr < 10:
+            continue
+        comps_str = ", ".join(gap.get("competitors_linked", []))
+        p = add_prospect(
+            business_id=business_id,
+            opportunity_type="competitor_gap",
+            target_url=source_url,
+            domain_rating=dr,
+            page_title=source_domain,
+            anchor_context="Links to competitor(s): " + comps_str,
+            pitch_angle="They link to " + comps_str + " — offer your content as a better resource",
+        )
+        prospects.append(p)
         if len(prospects) >= limit:
             break
 
-    log.info("find_competitor_gap_prospects  biz=%s  found=%d", business_id, len(prospects))
+    log.info("find_competitor_gap_prospects  biz=%s  found=%d  source=common_crawl", business_id, len(prospects))
     return prospects
 
 

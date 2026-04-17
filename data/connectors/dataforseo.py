@@ -53,17 +53,25 @@ class DataForSEOClient:
                         })
             except Exception:
                 log.warning("dataforseo.keyword_data: API failed, using self-hosted fallback")
-        # Self-hosted fallback
+        # Self-hosted fallback: SERPVolumeEstimator (Bing/Firecrawl, zero cost)
         if not items:
             try:
-                from core.keyword_intel import research_keyword, estimate_volume
-                from core.serp_scraper import estimate_keyword_difficulty
+                from data.connectors.serp_volume_estimator import SERPVolumeEstimator
+                sve = SERPVolumeEstimator()
                 for kw in keywords[:50]:
-                    vol = estimate_volume(kw, tenant)
-                    diff = estimate_keyword_difficulty(kw).get("difficulty", 50)
-                    items.append({"keyword": kw, "search_volume": vol, "competition": diff / 100,
-                                  "cpc": 0, "difficulty": diff, "source": "self_hosted"})
-                log.info("dataforseo.keyword_data: self-hosted fallback  keywords=%d", len(items))
+                    est = sve.estimate(kw)
+                    items.append({
+                        "keyword": kw,
+                        "search_volume": est.get("estimated_monthly_searches", 0),
+                        "competition": est.get("keyword_difficulty", 50) / 100,
+                        "cpc": 0,
+                        "difficulty": est.get("keyword_difficulty", 50),
+                        "volume_tier": est.get("volume_tier", "unknown"),
+                        "commercial_intent": est.get("commercial_intent", "unknown"),
+                        "serp_features": est.get("serp_features", []),
+                        "source": "serp_volume_estimator",
+                    })
+                log.info("dataforseo.keyword_data: SERPVolumeEstimator fallback  keywords=%d", len(items))
             except Exception:
                 log.exception("dataforseo.keyword_data: self-hosted fallback failed")
         if items:

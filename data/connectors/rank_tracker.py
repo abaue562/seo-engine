@@ -54,6 +54,10 @@ class RankTracker:
             self._dfs_client = DataForSEOClient()
         return self._dfs_client
 
+    def _rank_checker(self):
+        from data.connectors.rank_checker import RankChecker
+        return RankChecker()
+
     # ── Registration (keyword + URL tracking) ─────────────────────────────────
 
     async def register(self, keyword: str, url: str) -> None:
