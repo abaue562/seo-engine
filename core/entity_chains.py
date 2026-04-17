@@ -6,27 +6,51 @@ from typing import Dict, List, Optional
 log = logging.getLogger(__name__)
 
 def extract_entities(text: str) -> List[Dict]:
+    """Extract EAV triples via broad regex patterns + LLM fallback."""
+    STOP = {"the", "a", "an", "this", "that", "it", "he", "she", "they", "we", "you", "i", "its"}
     patterns = [
-        # "X is Y" / "X are Y"
-        re.compile(r'([A-Z][a-zA-Z\s]{2,30})\s+(?:is|are)\s+([^.!?]{10,100})', re.I),
-        # "costs $X" / "costs between $X and $Y"
-        re.compile(r'([a-zA-Z\s]{5,30})\s+costs?\s+(\$[\d,]+(?:\s*[-–]\s*\$[\d,]+)?)', re.I),
-        # "takes X hours/days"
-        re.compile(r'([a-zA-Z\s]{5,30})\s+takes?\s+(\d+(?:\s*[-–]\s*\d+)?\s+(?:hours?|days?|weeks?|minutes?))', re.I),
-        # "lasts X years"
-        re.compile(r'([a-zA-Z\s]{5,30})\s+lasts?\s+(\d+(?:\s*[-–]\s*\d+)?\s+(?:years?|months?))', re.I),
+        (re.compile(r"\b([A-Za-z][\w\s]{2,30}?)\s+(?:is|are)\s+([^.!?\n]{10,120})", re.I), "description"),
+        (re.compile(r"\b([A-Za-z][\w\s]{2,30}?)\s+use[sd]?\s+([^.!?\n]{10,100})", re.I), "uses"),
+        (re.compile(r"\b([\w\s]{3,30}?)\s+(?:costs?|prices?|runs?)\s+([\$\d][\d,\.%\s\-]+(?:per|each|for)?[\w\s]{0,20})", re.I), "cost"),
+        (re.compile(r"\b([\w\s]{3,30}?)\s+takes?\s+(\d[\d\s\-]*(?:hours?|days?|weeks?|minutes?))", re.I), "duration"),
+        (re.compile(r"\b([\w\s]{3,30}?)\s+lasts?\s+(\d[\d\s\-]*(?:years?|months?|hours?))", re.I), "lifespan"),
+        (re.compile(r"\b([A-Za-z][\w\s]{1,25}?):\s*([\d][^.\n]{3,60})", re.I), "specification"),
+        (re.compile(r"\b([\w\s]{3,30}?)\s+(?:saves?|reduces?|cuts?)\s+([\d]+[\d\s\-\.%]+(?:more|less|energy|cost)?)", re.I), "saving"),
     ]
     triples = []
     seen = set()
-    for pattern in patterns:
+    for pattern, attr in patterns:
         for match in pattern.finditer(text):
-            entity = match.group(1).strip()
+            entity = match.group(1).strip().rstrip(".,;:")
             value = match.group(2).strip()
-            key = (entity.lower(), value.lower())
-            if key not in seen and len(entity) > 3:
+            if len(entity) < 3 or entity.lower() in STOP:
+                continue
+            if len(value) < 3:
+                continue
+            key = (entity.lower()[:40], attr)
+            if key not in seen:
                 seen.add(key)
-                triples.append({"entity": entity, "attribute": "description", "value": value})
+                triples.append({"entity": entity, "attribute": attr, "value": value})
+    # LLM fallback when regex finds nothing
+    if not triples:
+        try:
+            from core.claude import call_claude
+            llm_prompt = (
+                "Extract entity-attribute-value facts from this text as a JSON array. "
+                "Each item: {entity, attribute, value}. Max 8 items. "
+                "Only include specific factual claims with numbers or clear definitions.\n\n"
+                f"TEXT:\n{text[:800]}\n\nJSON array only, no explanation:"
+            )
+            raw = call_claude(llm_prompt, max_tokens=400)
+            m = re.search(r"\[[\s\S]*\]", raw)
+            if m:
+                import json as _j
+                items = _j.loads(m.group())
+                triples = [i for i in items if isinstance(i, dict) and i.get("entity") and i.get("value")][:10]
+        except Exception:
+            pass
     return triples[:20]
+
 
 def inject_entity_section(html: str, entity_chains: List[Dict], entity_name: str) -> str:
     if not entity_chains or 'class="entity-facts"' in html:

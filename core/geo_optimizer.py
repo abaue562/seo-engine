@@ -109,15 +109,39 @@ Generate JSON only:
 }}"""
 
     geo_elements = {}
+
+    def _extract_json(text: str) -> dict:
+        """Extract first {...} JSON block from LLM response, tolerating prose wrapping."""
+        import json as _j, re as _re
+        # Try direct parse first
+        try:
+            return _j.loads(text.strip())
+        except Exception:
+            pass
+        # Extract outermost {...} block
+        m = _re.search(r'\{[\s\S]*\}', text)
+        if m:
+            try:
+                return _j.loads(m.group())
+            except Exception:
+                pass
+        return {}
+
     try:
-        from core.llm_gateway import LLMGateway
-        gw = LLMGateway(business_id=business_id)
-        raw = gw.generate(prompt, complexity="fast")
-        import json
-        clean = raw.strip().lstrip('```json').lstrip('```').rstrip('```').strip()
-        geo_elements = json.loads(clean)
-    except Exception as exc:
-        log.exception("geo_optimizer.llm_error  keyword=%s", keyword)
+        from core.claude import call_claude
+        raw = call_claude(prompt, max_tokens=600)
+        geo_elements = _extract_json(raw)
+        if not geo_elements:
+            raise ValueError("empty parse")
+    except Exception:
+        try:
+            from core.aion_bridge import aion
+            raw = aion.brain_complete(prompt, model="groq", max_tokens=600)
+            geo_elements = _extract_json(raw)
+        except Exception:
+            log.exception("geo_optimizer.llm_error  keyword=%s", keyword)
+
+    if not geo_elements:
         geo_elements = {
             'direct_question': f"What is {keyword}?",
             'direct_answer': f"{keyword.capitalize()} is a service offered by {business_name}.",
@@ -147,4 +171,4 @@ Generate JSON only:
     geo_score = score_geo_readiness(result_html)
 
     log.info("geo_optimizer.done  keyword=%s  geo_score=%d  words_added=%d", keyword, geo_score['score'], new_len - original_len)
-    return {'html': result_html, 'geo_elements': geo_elements, 'geo_score': geo_score, 'words_added': new_len - original_len}
+    return {'html': result_html, 'geo_elements': geo_elements, 'geo_score': geo_score, 'score_after': geo_score, 'injections_applied': list(geo_elements.keys()), 'words_added': new_len - original_len}
