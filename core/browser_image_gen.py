@@ -182,13 +182,12 @@ async def generate_image(
 
             log.info("browser_image_gen.waiting  seconds=%.0f", wait_seconds)
 
-            # Wait for an <img> to appear that isn't a UI element (avatar, icon, etc.)
+            # Wait for a large generated image to appear (not avatars/icons)
             img_url = ""
             deadline = time.time() + wait_seconds
             while time.time() < deadline:
-                await asyncio.sleep(3)
+                await asyncio.sleep(4)
                 try:
-                    # Find large generated images (not avatars/icons — those are small)
                     img_srcs: list[str] = await page.evaluate("""
                         () => Array.from(document.querySelectorAll('img'))
                             .filter(img => {
@@ -209,7 +208,31 @@ async def generate_image(
                     continue
 
             if not img_url:
-                # Fallback: screenshot the response area
+                # Extended wait — Grok can be slow (up to 60s total)
+                log.info("browser_image_gen.extended_wait  extra_30s")
+                extra_deadline = time.time() + 30
+                while time.time() < extra_deadline:
+                    await asyncio.sleep(5)
+                    try:
+                        img_srcs = await page.evaluate("""
+                            () => Array.from(document.querySelectorAll('img'))
+                                .filter(img => {
+                                    const r = img.getBoundingClientRect();
+                                    return r.width > 200 && r.height > 200 &&
+                                           img.src && img.src.startsWith('http') &&
+                                           !img.src.includes('profile_images') &&
+                                           !img.src.includes('emoji');
+                                })
+                                .map(img => img.src)
+                        """)
+                        if img_srcs:
+                            img_url = img_srcs[0]
+                            log.info("browser_image_gen.image_found_late  url=%s", img_url[:80])
+                            break
+                    except Exception:
+                        continue
+
+            if not img_url:
                 log.warning("browser_image_gen.no_img_src  taking_screenshot_fallback")
                 try:
                     await page.screenshot(path=str(out_path), full_page=False)
@@ -220,7 +243,7 @@ async def generate_image(
                     log.error("browser_image_gen.screenshot_fail  err=%s", se)
                     return ""
 
-            # Download the image
+            # Download using page context (carries session cookies — fixes 403 on api.x.com)
             try:
                 img_response = await page.request.get(img_url)
                 if img_response.ok:
@@ -230,7 +253,23 @@ async def generate_image(
                     await _save_session(ctx, spath)
                     return str(out_path)
                 else:
-                    log.error("browser_image_gen.download_fail  status=%d", img_response.status)
+                    # 403 from api.x.com — use context fetch which includes cookies
+                    log.warning("browser_image_gen.request_403  trying_context_fetch")
+                    img_bytes: bytes = await page.evaluate(
+                        """async (url) => {
+                            const r = await fetch(url, {credentials: 'include'});
+                            const buf = await r.arrayBuffer();
+                            return Array.from(new Uint8Array(buf));
+                        }""",
+                        img_url,
+                    )
+                    if img_bytes:
+                        out_path.write_bytes(bytes(img_bytes))
+                        log.info("browser_image_gen.saved_via_fetch  path=%s  bytes=%d",
+                                 out_path, out_path.stat().st_size)
+                        await _save_session(ctx, spath)
+                        return str(out_path)
+                    log.error("browser_image_gen.fetch_empty")
                     return ""
             except Exception as de:
                 log.error("browser_image_gen.download_err  err=%s", de)
