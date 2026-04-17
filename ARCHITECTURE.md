@@ -647,3 +647,11 @@ Step 1: Set GitHub/Reddit/Medium/LinkedIn/DevTo API keys → 7.0→8.2
 Step 2: Build rank_checker + serp_volume_estimator + common_crawl → 8.2→8.8
 Step 3: Build Wikidata auto-create pipeline → 8.8→9.2
 Step 4: Onboard first real tenant → 9.2→9.7+
+
+| 2026-04-17 | 55ab613 | feat: self-hosted data scrapers — DataForSEO + Ahrefs replaced:
+  data/connectors/rank_checker.py (Bing SERP rank tracking via Firecrawl)
+  data/connectors/serp_volume_estimator.py (KD+volume from SERP signals, autocomplete)
+  data/connectors/common_crawl.py (backlinks via CC CDX API + Wayback CDX, free)
+  rank_tracker.py patched: RankChecker default, DFS only if credentials set
+  dataforseo.py patched: SERPVolumeEstimator as keyword fallback
+  backlink_prospector.py patched: CommonCrawlClient for competitor gap analysis |
