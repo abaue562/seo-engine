@@ -279,7 +279,32 @@ app.conf.update(
         },
         "competitor-content-alerts": {
             "task": "taskq.tasks.competitor_content_alerts",
-            "schedule": 86400,          # 24 hours — competitor content monitoring
+            "schedule": 86400,
+            "options": {"queue": "monitoring"},
+        },
+        "run-tech-audit": {
+            "task": "taskq.tasks.run_tech_audit",
+            "schedule": 604800,         # weekly technical SEO audit
+            "options": {"queue": "monitoring"},
+        },
+        "run-site-health-check": {
+            "task": "taskq.tasks.run_site_health_check",
+            "schedule": 86400,           # daily uptime + pagespeed sample
+            "options": {"queue": "monitoring"},
+        },
+        "run-cannibalization-check": {
+            "task": "taskq.tasks.run_cannibalization_check",
+            "schedule": 604800,          # weekly cannibalization scan
+            "options": {"queue": "monitoring"},
+        },
+        "run-refresh-queue": {
+            "task": "taskq.tasks.run_refresh_queue",
+            "schedule": 86400,           # daily refresh queue check
+            "options": {"queue": "execution"},
+        },
+        "run-competitor-tracking": {
+            "task": "taskq.tasks.run_competitor_tracking",
+            "schedule": 604800,          # weekly competitor diff
             "options": {"queue": "monitoring"},
         },
     },

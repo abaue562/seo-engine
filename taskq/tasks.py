@@ -3093,3 +3093,101 @@ def verify_indexing_status(self, url: str, business_id: str = "", attempt: int =
         if attempt < len(_VERIFY_COUNTDOWNS):
             raise self.retry(exc=exc, countdown=_VERIFY_COUNTDOWNS[attempt])
         return {"status": "error", "url": url, "error": str(exc), "task_id": self.request.id}
+
+
+# Doc 06 tasks
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_tech_audit")
+def run_tech_audit(self, business_id: str = "") -> dict:
+    log.info("run_tech_audit.start  task_id=%s  biz=%s", self.request.id, business_id)
+    try:
+        from data.connectors.tech_audit import run_audit, audit_to_dict
+        import json, sqlite3
+        from pathlib import Path
+        all_biz = json.loads(Path("data/storage/businesses.json").read_text())
+        biz = next((b for b in (all_biz if isinstance(all_biz, list) else all_biz.values())
+                    if b.get("id") == business_id or b.get("business_id") == business_id or not business_id), {})
+        domain = biz.get("domain", "").replace("https://", "").replace("http://", "").rstrip("/")
+        urls = [r[0] for r in sqlite3.connect("data/storage/seo_engine.db").execute(
+            "SELECT url FROM published_urls WHERE business_id=? AND status=? LIMIT 5", [business_id, "live"]).fetchall()]
+        result = audit_to_dict(run_audit(domain, urls))
+        _save_result(self.request.id, {"status": "success", **result, "task_id": self.request.id})
+        log.info("run_tech_audit.done  score=%d  critical=%d", result["score"], result["critical_count"])
+        return {"status": "success", **result, "task_id": self.request.id}
+    except Exception as exc:
+        log.exception("run_tech_audit.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_site_health_check")
+def run_site_health_check(self, business_id: str = "") -> dict:
+    log.info("run_site_health_check.start  task_id=%s  biz=%s", self.request.id, business_id)
+    try:
+        from monitoring.site_health import run_uptime_check, run_pagespeed_sample
+        import sqlite3
+        urls = [r[0] for r in sqlite3.connect("data/storage/seo_engine.db").execute(
+            "SELECT url FROM published_urls WHERE business_id=? AND status=? LIMIT 50", [business_id, "live"]).fetchall()]
+        uptime = run_uptime_check(business_id, urls)
+        pagespeed = run_pagespeed_sample(business_id, urls)
+        result = {"status": "success", "uptime": uptime, "pagespeed": pagespeed, "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_site_health_check.done  ok=%d  failed=%d", uptime["ok"], uptime["failed"])
+        return result
+    except Exception as exc:
+        log.exception("run_site_health_check.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_cannibalization_check")
+def run_cannibalization_check(self, business_id: str = "") -> dict:
+    log.info("run_cannibalization_check.start  task_id=%s  biz=%s", self.request.id, business_id)
+    try:
+        from core.cannibalization import detect_serp_cannibalization
+        cases = detect_serp_cannibalization(business_id)
+        result = {"status": "success", "cases": cases, "count": len(cases), "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_cannibalization_check.done  cases=%d", len(cases))
+        return result
+    except Exception as exc:
+        log.exception("run_cannibalization_check.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="execution", max_retries=1, name="taskq.tasks.run_refresh_queue")
+def run_refresh_queue(self, business_id: str = "") -> dict:
+    log.info("run_refresh_queue.start  task_id=%s  biz=%s", self.request.id, business_id)
+    try:
+        from core.refresh_schedule import get_refresh_queue
+        queue = get_refresh_queue(business_id, limit=5)
+        stale = [q for q in queue if q["needs_refresh"]]
+        result = {"status": "success", "stale_count": len(stale), "queue": stale[:10], "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_refresh_queue.done  stale=%d", len(stale))
+        return result
+    except Exception as exc:
+        log.exception("run_refresh_queue.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
+
+
+@app.task(bind=True, queue="monitoring", max_retries=1, name="taskq.tasks.run_competitor_tracking")
+def run_competitor_tracking(self, business_id: str = "") -> dict:
+    log.info("run_competitor_tracking.start  task_id=%s  biz=%s", self.request.id, business_id)
+    try:
+        from data.connectors.competitor_tracker import run_competitor_tracking as _track
+        import json
+        from pathlib import Path
+        all_biz = json.loads(Path("data/storage/businesses.json").read_text())
+        biz = next((b for b in (all_biz if isinstance(all_biz, list) else all_biz.values())
+                    if b.get("id") == business_id or b.get("business_id") == business_id or not business_id), {})
+        competitors = biz.get("competitors", [])
+        if not competitors:
+            return {"status": "skipped", "reason": "no_competitors_configured", "task_id": self.request.id}
+        results = _track(business_id, competitors)
+        changes = sum(1 for r in results if r.get("has_changes"))
+        result = {"status": "success", "competitors_checked": len(results), "with_changes": changes, "task_id": self.request.id}
+        _save_result(self.request.id, result)
+        log.info("run_competitor_tracking.done  checked=%d  changes=%d", len(results), changes)
+        return result
+    except Exception as exc:
+        log.exception("run_competitor_tracking.error  task_id=%s", self.request.id)
+        return {"status": "error", "error": str(exc), "task_id": self.request.id}
