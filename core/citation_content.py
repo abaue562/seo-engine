@@ -191,8 +191,12 @@ Requirements:
 7. HTML only, no markdown:"""
 
     try:
-        from core.claude import call_claude
-        html = call_claude(prompt, max_tokens=2000)
+        try:
+            from core.aion_bridge import aion
+            html = aion.brain_complete(prompt, model='groq', max_tokens=1800)
+        except Exception:
+            from core.claude import call_claude
+            html = call_claude(prompt, max_tokens=2000)
         html = re.sub(r'^```html\s*', '', html.strip())
         html = re.sub(r'```$', '', html.strip())
     except Exception:
@@ -241,8 +245,12 @@ This should read like a professional market research report. Every section needs
 HTML only:"""
 
     try:
-        from core.claude import call_claude
-        html = call_claude(prompt, max_tokens=2200)
+        try:
+            from core.aion_bridge import aion
+            html = aion.brain_complete(prompt, model='groq', max_tokens=1800)
+        except Exception:
+            from core.claude import call_claude
+            html = call_claude(prompt, max_tokens=2200)
         html = re.sub(r'^```html\s*', '', html.strip())
         html = re.sub(r'```$', '', html.strip())
     except Exception:
