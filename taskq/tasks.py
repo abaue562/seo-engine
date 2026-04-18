@@ -3855,3 +3855,164 @@ def run_press_release(self, business_id: str, trigger_type: str, context: dict) 
     except Exception as exc:
         log.exception('run_press_release.error  task_id=%s', self.request.id)
         return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
+
+
+# ── Daily drip publishing — 1 article/day per platform ───────────────────────
+# Slow cadence prevents ban/spam flags on Dev.to, WordPress, and future platforms.
+
+@app.task(bind=True, queue='execution', max_retries=1, name='taskq.tasks.run_devto_drip')
+def run_devto_drip(self) -> dict:
+    """Daily: publish the next unpublished BBL article to Dev.to (1/day max)."""
+    log.info('run_devto_drip.start  task_id=%s', self.request.id)
+    import json, os, re, time, requests
+    from pathlib import Path
+    from html.parser import HTMLParser
+
+    API_KEY = os.getenv('DEVTO_API_KEY', '')
+    if not API_KEY:
+        log.warning('run_devto_drip.skip  DEVTO_API_KEY not set')
+        return {'status': 'skip', 'reason': 'no_api_key'}
+
+    LOG_PATH = Path('data/storage/devto_published.json')
+    ARTICLES_DIR = Path('data/storage/articles')
+    BBL_DOMAIN = 'https://blendbrightlights.com'
+    TAGS_MAP = {
+        'landscape lighting': ['homeimprovement', 'led', 'outdoor', 'diy'],
+        'gutter':             ['homeimprovement', 'maintenance', 'diy', 'canada'],
+        'moss':               ['homeimprovement', 'roofing', 'diy', 'canada'],
+        'window':             ['homeimprovement', 'cleaning', 'diy', 'canada'],
+        'roof':               ['homeimprovement', 'roofing', 'canada', 'diy'],
+        'exterior':           ['homeimprovement', 'outdoor', 'canada', 'diy'],
+        'led':                ['led', 'lighting', 'homeimprovement', 'outdoor'],
+        'lighting':           ['lighting', 'led', 'homeimprovement', 'outdoor'],
+    }
+
+    published = {}
+    if LOG_PATH.exists():
+        try:
+            published = json.loads(LOG_PATH.read_text())
+        except Exception:
+            pass
+
+    html_files = sorted(ARTICLES_DIR.glob('bbl_*.html'))
+    pending = [f for f in html_files if f.stem not in published]
+
+    if not pending:
+        log.info('run_devto_drip.done  all_published')
+        return {'status': 'ok', 'published': 0, 'reason': 'all_done'}
+
+    html_file = pending[0]  # one per day
+    slug = html_file.stem
+    html = html_file.read_text(encoding='utf-8')
+    title_match = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.IGNORECASE | re.DOTALL)
+    title = re.sub(r'<[^>]+>', '', title_match.group(1)).strip() if title_match else slug.replace('_', ' ').title()
+
+    # Simple HTML strip for markdown body
+    body = re.sub(r'<[^>]+>', ' ', html)
+    body = re.sub(r'\s{2,}', '\n\n', body).strip()
+    body += f'\n\n---\n*Professional services by [BlendBright Lights]({BBL_DOMAIN}) — Kelowna, BC*'
+
+    combined = (title + ' ' + slug).lower()
+    tags = ['homeimprovement', 'diy', 'canada', 'outdoor']
+    for k, t in TAGS_MAP.items():
+        if k in combined:
+            tags = t
+            break
+
+    canonical_slug = slug.replace('bbl_', '').replace('_', '-')
+    canonical_url = f'{BBL_DOMAIN}/{canonical_slug}/'
+
+    try:
+        r = requests.post(
+            'https://dev.to/api/articles',
+            headers={'api-key': API_KEY, 'Content-Type': 'application/json'},
+            json={'article': {
+                'title': title,
+                'body_markdown': body,
+                'published': True,
+                'tags': tags[:4],
+                'canonical_url': canonical_url,
+                'series': 'Kelowna Home Services Guide',
+            }},
+            timeout=30,
+        )
+        data = r.json()
+        if r.status_code in (200, 201):
+            published[slug] = {'title': title, 'url': data.get('url', ''), 'devto_id': data.get('id'), 'canonical': canonical_url, 'published_at': data.get('published_at', '')}
+            LOG_PATH.write_text(json.dumps(published, indent=2))
+            log.info('run_devto_drip.published  title=%s  url=%s', title[:50], data.get('url', ''))
+            return {'status': 'ok', 'published': 1, 'url': data.get('url', ''), 'remaining': len(pending) - 1}
+        else:
+            err = data.get('error', str(data))
+            log.error('run_devto_drip.fail  status=%d  err=%s', r.status_code, err)
+            return {'status': 'error', 'error': err, 'http_status': r.status_code}
+    except Exception as exc:
+        log.exception('run_devto_drip.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc)}
+
+
+@app.task(bind=True, queue='execution', max_retries=1, name='taskq.tasks.run_wordpress_drip')
+def run_wordpress_drip(self) -> dict:
+    """Daily: publish the next unpublished BBL article to self-hosted WordPress (1/day max)."""
+    log.info('run_wordpress_drip.start  task_id=%s', self.request.id)
+    import json, os, re, time, requests
+    from pathlib import Path
+    from requests.auth import HTTPBasicAuth
+
+    WP_URL  = os.getenv('WP_URL', 'http://204.168.184.50:8910')
+    WP_USER = os.getenv('WP_USER', 'abaue562')
+    WP_PASS = os.getenv('WP_APP_PASSWORD', '')
+    if not WP_PASS:
+        log.warning('run_wordpress_drip.skip  WP_APP_PASSWORD not set')
+        return {'status': 'skip', 'reason': 'no_password'}
+
+    LOG_PATH     = Path('data/storage/wordpress_published.json')
+    ARTICLES_DIR = Path('data/storage/articles')
+    BBL_DOMAIN   = 'https://blendbrightlights.com'
+
+    published = {}
+    if LOG_PATH.exists():
+        try:
+            published = json.loads(LOG_PATH.read_text())
+        except Exception:
+            pass
+
+    html_files = sorted(ARTICLES_DIR.glob('bbl_*.html'))
+    pending = [f for f in html_files if f.stem not in published]
+
+    if not pending:
+        log.info('run_wordpress_drip.done  all_published')
+        return {'status': 'ok', 'published': 0, 'reason': 'all_done'}
+
+    html_file = pending[0]
+    slug = html_file.stem
+    html = html_file.read_text(encoding='utf-8')
+    title_match = re.search(r'<h1[^>]*>(.*?)</h1>', html, re.IGNORECASE | re.DOTALL)
+    title = re.sub(r'<[^>]+>', '', title_match.group(1)).strip() if title_match else slug.replace('_', ' ').title()
+    content = re.sub(r'<(script|style)[^>]*>.*?</\1>', '', html, flags=re.DOTALL)
+    content += f'\n\n<p><em>Professional services by <a href="{BBL_DOMAIN}">BlendBright Lights</a> — Kelowna, BC</em></p>'
+
+    wp_slug      = slug.replace('bbl_', '').replace('_', '-')
+    canonical_url = f'{BBL_DOMAIN}/{wp_slug}/'
+
+    try:
+        r = requests.post(
+            f'{WP_URL}/wp-json/wp/v2/posts',
+            auth=HTTPBasicAuth(WP_USER, WP_PASS),
+            json={'title': title, 'content': content, 'status': 'publish', 'slug': wp_slug},
+            timeout=30,
+        )
+        data = r.json()
+        if r.status_code in (200, 201):
+            post_url = data.get('link', '')
+            published[slug] = {'title': title, 'url': post_url, 'wp_id': data.get('id'), 'canonical': canonical_url}
+            LOG_PATH.write_text(json.dumps(published, indent=2))
+            log.info('run_wordpress_drip.published  title=%s  url=%s', title[:50], post_url)
+            return {'status': 'ok', 'published': 1, 'url': post_url, 'remaining': len(pending) - 1}
+        else:
+            err = data.get('message', str(data))
+            log.error('run_wordpress_drip.fail  status=%d  err=%s', r.status_code, err)
+            return {'status': 'error', 'error': err, 'http_status': r.status_code}
+    except Exception as exc:
+        log.exception('run_wordpress_drip.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc)}

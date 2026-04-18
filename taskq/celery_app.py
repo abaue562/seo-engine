@@ -560,3 +560,14 @@ app.conf.beat_schedule.update({
         "kwargs": {"business_id": ""},
     },
 })
+# Daily drip publishing — 1 article/day per platform (ban prevention)
+app.conf.beat_schedule.update({
+    'devto-drip-daily': {
+        'task': 'taskq.tasks.run_devto_drip',
+        'schedule': crontab(hour=10, minute=0),
+    },
+    'wordpress-drip-daily': {
+        'task': 'taskq.tasks.run_wordpress_drip',
+        'schedule': crontab(hour=12, minute=0),
+    },
+})
