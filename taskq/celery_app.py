@@ -571,3 +571,32 @@ app.conf.beat_schedule.update({
         'schedule': crontab(hour=12, minute=0),
     },
 })
+
+# Schema + keyword + AI optimization beat tasks
+app.conf.beat_schedule.update({
+    'schema-validation-weekly': {
+        'task': 'taskq.tasks.run_schema_validation_sweep',
+        'schedule': crontab(hour=6, minute=0, day_of_week=2),
+        'kwargs': {'business_id': ''},
+    },
+    'keyword-expansion-weekly': {
+        'task': 'taskq.tasks.run_keyword_expansion',
+        'schedule': crontab(hour=7, minute=0, day_of_week=2),
+        'kwargs': {'business_id': '', 'target_count': 100},
+    },
+    'cannibalization-check-weekly': {
+        'task': 'taskq.tasks.run_cannibalization_check',
+        'schedule': crontab(hour=8, minute=0, day_of_week=3),
+        'kwargs': {'business_id': ''},
+    },
+    'paa-content-queue-weekly': {
+        'task': 'taskq.tasks.run_paa_content_queue',
+        'schedule': crontab(hour=9, minute=0, day_of_week=3),
+        'kwargs': {'business_id': ''},
+    },
+    'ai-content-audit-weekly': {
+        'task': 'taskq.tasks.run_ai_content_audit',
+        'schedule': crontab(hour=10, minute=0, day_of_week=3),
+        'kwargs': {'business_id': ''},
+    },
+})

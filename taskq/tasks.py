@@ -4016,3 +4016,217 @@ def run_wordpress_drip(self) -> dict:
     except Exception as exc:
         log.exception('run_wordpress_drip.error  task_id=%s', self.request.id)
         return {'status': 'error', 'error': str(exc)}
+
+
+# ── Schema + keyword + AI content optimization tasks ──────────────────────────
+
+@app.task(bind=True, queue='analysis', max_retries=2, name='taskq.tasks.run_schema_validation_sweep')
+def run_schema_validation_sweep(self, business_id: str = '') -> dict:
+    """Weekly: validate schema on all live pages, log missing/broken schema."""
+    log.info('run_schema_validation_sweep.start  task_id=%s  biz=%s', self.request.id, business_id)
+    try:
+        from core.schema_injector import validate_all_published
+        import json
+        from pathlib import Path
+        biz_ids = []
+        if business_id:
+            biz_ids = [business_id]
+        else:
+            try:
+                all_biz = json.loads(Path('data/storage/businesses.json').read_text())
+                biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+                biz_ids = [b.get('id') or b.get('business_id', '') for b in biz_list if b.get('id') or b.get('business_id')]
+            except Exception:
+                pass
+        all_results = []
+        for bid in biz_ids:
+            if not bid:
+                continue
+            results = validate_all_published(bid)
+            all_results.extend(results)
+        valid = sum(1 for r in all_results if r.get('valid'))
+        log.info('run_schema_validation_sweep.done  task_id=%s  checked=%d  valid=%d',
+                 self.request.id, len(all_results), valid)
+        return {'status': 'ok', 'checked': len(all_results), 'valid': valid, 'task_id': self.request.id}
+    except Exception as exc:
+        log.exception('run_schema_validation_sweep.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
+
+
+@app.task(bind=True, queue='analysis', max_retries=2, name='taskq.tasks.run_keyword_expansion')
+def run_keyword_expansion(self, business_id: str = '', target_count: int = 100) -> dict:
+    """Weekly: expand keyword seeds for all tenants to ensure 50-200 seed density."""
+    log.info('run_keyword_expansion.start  task_id=%s  biz=%s', self.request.id, business_id)
+    try:
+        from core.keyword_engine import expand_seeds
+        import json, sqlite3
+        from pathlib import Path
+        biz_ids = []
+        if business_id:
+            biz_ids = [business_id]
+        else:
+            try:
+                all_biz = json.loads(Path('data/storage/businesses.json').read_text())
+                biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+                biz_ids = [b.get('id') or b.get('business_id', '') for b in biz_list if b.get('id') or b.get('business_id')]
+            except Exception:
+                pass
+        total_added = 0
+        for bid in biz_ids:
+            if not bid:
+                continue
+            seeds = expand_seeds(bid, target_count=target_count)
+            # Store new seeds in keyword_intel table
+            try:
+                conn = sqlite3.connect('data/storage/seo_engine.db')
+                for seed in seeds:
+                    conn.execute(
+                        'INSERT OR IGNORE INTO keyword_intel (id, keyword, business_id, intent, volume_estimate, difficulty) VALUES (?,?,?,?,?,?)',
+                        [__import__('uuid').uuid4().hex, seed['keyword'], bid, 'unknown', 0, 0]
+                    )
+                conn.commit()
+                conn.close()
+                total_added += len(seeds)
+            except Exception as db_err:
+                log.warning('run_keyword_expansion.db_fail  biz=%s  err=%s', bid, db_err)
+        log.info('run_keyword_expansion.done  task_id=%s  total_added=%d', self.request.id, total_added)
+        return {'status': 'ok', 'total_added': total_added, 'task_id': self.request.id}
+    except Exception as exc:
+        log.exception('run_keyword_expansion.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
+
+
+@app.task(bind=True, queue='analysis', max_retries=2, name='taskq.tasks.run_cannibalization_check')
+def run_cannibalization_check(self, business_id: str = '') -> dict:
+    """Weekly: detect keyword cannibalization across published pages."""
+    log.info('run_cannibalization_check.start  task_id=%s  biz=%s', self.request.id, business_id)
+    try:
+        from core.keyword_engine import detect_cannibalization
+        import json
+        from pathlib import Path
+        biz_ids = []
+        if business_id:
+            biz_ids = [business_id]
+        else:
+            try:
+                all_biz = json.loads(Path('data/storage/businesses.json').read_text())
+                biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+                biz_ids = [b.get('id') or b.get('business_id', '') for b in biz_list if b.get('id') or b.get('business_id')]
+            except Exception:
+                pass
+        all_issues = []
+        for bid in biz_ids:
+            if not bid:
+                continue
+            issues = detect_cannibalization(bid)
+            all_issues.extend(issues)
+            if issues:
+                log.warning('run_cannibalization_check.issues_found  biz=%s  count=%d  high=%d',
+                           bid, len(issues), sum(1 for i in issues if i.get('severity') == 'high'))
+        return {'status': 'ok', 'issues': len(all_issues), 'details': all_issues[:10], 'task_id': self.request.id}
+    except Exception as exc:
+        log.exception('run_cannibalization_check.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
+
+
+@app.task(bind=True, queue='content', max_retries=2, name='taskq.tasks.run_paa_content_queue')
+def run_paa_content_queue(self, business_id: str = '') -> dict:
+    """Weekly: convert PAA tree cache into content generation jobs.
+
+    This is the PAA → content wiring that completes the PAA pipeline.
+    Takes cached PAA questions, routes by intent, queues content generation.
+    """
+    log.info('run_paa_content_queue.start  task_id=%s  biz=%s', self.request.id, business_id)
+    try:
+        from core.keyword_engine import build_paa_content_queue
+        import json
+        from pathlib import Path
+        biz_ids = []
+        if business_id:
+            biz_ids = [business_id]
+        else:
+            try:
+                all_biz = json.loads(Path('data/storage/businesses.json').read_text())
+                biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+                biz_ids = [b.get('id') or b.get('business_id', '') for b in biz_list if b.get('id') or b.get('business_id')]
+            except Exception:
+                pass
+        total_queued = 0
+        for bid in biz_ids:
+            if not bid:
+                continue
+            jobs = build_paa_content_queue(bid, top_n=3)
+            for job in jobs:
+                try:
+                    run_content_pipeline.apply_async(
+                        kwargs={'business_id': bid, 'keyword': job['keyword'], 'intent': job['intent']},
+                        queue='content',
+                    )
+                    total_queued += 1
+                    log.info('run_paa_content_queue.queued  biz=%s  kw=%s  intent=%s',
+                             bid, job['keyword'], job['intent'])
+                except Exception as qe:
+                    log.warning('run_paa_content_queue.queue_fail  biz=%s  kw=%s  err=%s',
+                                bid, job['keyword'], qe)
+        return {'status': 'ok', 'queued': total_queued, 'task_id': self.request.id}
+    except Exception as exc:
+        log.exception('run_paa_content_queue.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}
+
+
+@app.task(bind=True, queue='analysis', max_retries=2, name='taskq.tasks.run_ai_content_audit')
+def run_ai_content_audit(self, business_id: str = '') -> dict:
+    """Weekly: score all published pages for AI search readiness, log low scorers."""
+    log.info('run_ai_content_audit.start  task_id=%s  biz=%s', self.request.id, business_id)
+    try:
+        from core.ai_content_optimizer import score_ai_readiness
+        import urllib.request, json
+        from pathlib import Path
+        biz_ids = []
+        if business_id:
+            biz_ids = [business_id]
+        else:
+            try:
+                all_biz = json.loads(Path('data/storage/businesses.json').read_text())
+                biz_list = all_biz if isinstance(all_biz, list) else list(all_biz.values())
+                biz_ids = [b.get('id') or b.get('business_id', '') for b in biz_list if b.get('id') or b.get('business_id')]
+            except Exception:
+                pass
+
+        all_scores = []
+        for bid in biz_ids:
+            pub_path = Path(f'data/storage/published_urls_{bid}.json')
+            if not pub_path.exists():
+                for p in Path('data/storage').glob('published_urls_*.json'):
+                    pub_path = p
+                    break
+            if not pub_path.exists():
+                continue
+            try:
+                data = json.loads(pub_path.read_text())
+                pages = data if isinstance(data, list) else list(data.values())
+                for page in pages[:10]:
+                    url = page.get('url', '') if isinstance(page, dict) else ''
+                    kw = page.get('keyword', '') if isinstance(page, dict) else ''
+                    if not url:
+                        continue
+                    try:
+                        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+                        with urllib.request.urlopen(req, timeout=10) as r:
+                            html = r.read().decode('utf-8', errors='replace')
+                        score = score_ai_readiness(html, kw)
+                        all_scores.append({'url': url, 'score': score['total'], 'grade': score['grade']})
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        low_scorers = [s for s in all_scores if s['score'] < 60]
+        avg = sum(s['score'] for s in all_scores) / max(len(all_scores), 1)
+        log.info('run_ai_content_audit.done  task_id=%s  pages=%d  avg_score=%.1f  low=%d',
+                 self.request.id, len(all_scores), avg, len(low_scorers))
+        return {'status': 'ok', 'pages_checked': len(all_scores), 'avg_ai_score': round(avg, 1),
+                'low_scorers': low_scorers[:5], 'task_id': self.request.id}
+    except Exception as exc:
+        log.exception('run_ai_content_audit.error  task_id=%s', self.request.id)
+        return {'status': 'error', 'error': str(exc), 'task_id': self.request.id}

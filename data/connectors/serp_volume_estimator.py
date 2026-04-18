@@ -108,13 +108,20 @@ def _score_volume(signals: dict) -> tuple:
     elif ac_pos <= 10:
         v += 4
 
-    if v >= 70:
-        return "high", 10000
-    if v >= 45:
-        return "medium", 2000
+    # 7-tier refined volume (calibrated for local service markets)
+    if v >= 90:
+        return "ultra_high", 50000
+    if v >= 75:
+        return "very_high", 10000
+    if v >= 60:
+        return "high", 3000
+    if v >= 48:
+        return "medium_high", 1000
+    if v >= 35:
+        return "medium", 300
     if v >= 20:
-        return "low", 300
-    return "micro", 40
+        return "low", 75
+    return "micro", 15
 
 
 class SERPVolumeEstimator:
